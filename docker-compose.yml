@@ -1,0 +1,36 @@
+# docker compose up -d → starts Postgres 16 + Redis 7 for local development.
+# Postgres exposes 5432, Redis exposes 6379 — same ports the spec assumes.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: civixlab-postgres
+    environment:
+      POSTGRES_DB: civixlab
+      POSTGRES_USER: civixlab
+      POSTGRES_PASSWORD: civixlab
+    ports:
+      - "5432:5432"
+    volumes:
+      - civixlab-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U civixlab -d civixlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: civixlab-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - civixlab-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  civixlab-pgdata:
+  civixlab-redisdata:

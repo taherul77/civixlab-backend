@@ -1,0 +1,356 @@
+// CiviXLab database schema — mirrors spec §4 verbatim.
+// Tenant isolation is enforced by Postgres Row-Level Security policies in
+// `prisma/migrations/.../rls.sql`. Every tenant-owned table carries
+// `tenant_id`; every Prisma query the API service issues is wrapped by
+// `withTenant(tenantId, fn)` which sets `app.current_tenant` per session.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// 1. Tenants
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id                       String   @id @default(uuid()) @db.Uuid
+  name                     String   @db.VarChar(255)
+  subdomain                String   @unique @db.VarChar(100)
+  logoUrl                  String?  @map("logo_url") @db.VarChar(500)
+  crNumber                 String?  @map("cr_number") @db.VarChar(50)
+  vatNumber                String?  @map("vat_number") @db.VarChar(50)
+  subscriptionTier         String   @default("starter") @map("subscription_tier") @db.VarChar(50)
+  subscriptionStatus       String   @default("active") @map("subscription_status") @db.VarChar(50)
+  maxUsers                 Int      @default(5) @map("max_users")
+  maxTestsPerMonth         Int      @default(200) @map("max_tests_per_month")
+  storageLimitGb           Int      @default(10) @map("storage_limit_gb")
+  settings                 Json     @default("{}")
+  saudiComplianceEnabled   Boolean  @default(true) @map("saudi_compliance_enabled")
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  users      User[]
+  projects   Project[]
+  samples    Sample[]
+  tests      Test[]
+  waterTests WaterTest[]
+  equipment  Equipment[]
+  reports    Report[]
+  templates  TestTemplate[]
+  auditLogs  AuditLog[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
+// 2. Users
+// ---------------------------------------------------------------------------
+
+model User {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
+  email                 String    @db.VarChar(255)
+  passwordHash          String?   @map("password_hash") @db.VarChar(255)
+  firstName             String?   @map("first_name") @db.VarChar(100)
+  lastName              String?   @map("last_name") @db.VarChar(100)
+  phone                 String?   @db.VarChar(50)
+  iqamaNumber           String?   @map("iqama_number") @db.VarChar(20)
+  role                  String    @db.VarChar(50)
+  department            String?   @db.VarChar(100)
+  signatureUrl          String?   @map("signature_url") @db.VarChar(500)
+  digitalCertificateId  String?   @map("digital_certificate_id") @db.VarChar(100)
+  isActive              Boolean   @default(true) @map("is_active")
+  mfaEnabled            Boolean   @default(false) @map("mfa_enabled")
+  mfaSecret             String?   @map("mfa_secret") @db.VarChar(255)
+  mfaRecoveryCodes      String[]  @default([]) @map("mfa_recovery_codes")
+  lastLoginAt           DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects     Project[] @relation("ProjectCreatedBy")
+  samples      Sample[]  @relation("SampleCreatedBy")
+  testsTested  Test[]    @relation("TestTestedBy")
+  testsReviewed Test[]   @relation("TestReviewedBy")
+  testsApproved Test[]   @relation("TestApprovedBy")
+  waterTested  WaterTest[] @relation("WaterTestTestedBy")
+  reportsGenerated Report[] @relation("ReportGeneratedBy")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, email], name: "idx_users_tenant_email")
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// 3. Projects
+// ---------------------------------------------------------------------------
+
+model Project {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @map("tenant_id") @db.Uuid
+  projectCode            String   @map("project_code") @db.VarChar(100)
+  projectName            String   @map("project_name") @db.VarChar(255)
+  clientName             String?  @map("client_name") @db.VarChar(255)
+  clientEmail            String?  @map("client_email") @db.VarChar(255)
+  location               String?  @db.VarChar(500)
+  city                   String?  @db.VarChar(100)
+  region                 String?  @db.VarChar(100)
+  engineerName           String?  @map("engineer_name") @db.VarChar(255)
+  engineerLicense        String?  @map("engineer_license") @db.VarChar(100)
+  startDate              DateTime? @map("start_date") @db.Date
+  endDate                DateTime? @map("end_date") @db.Date
+  contractValue          Decimal? @map("contract_value") @db.Decimal(15, 2)
+  etimadContractNumber   String?  @map("etimad_contract_number") @db.VarChar(100)
+  status                 String   @default("active") @db.VarChar(50)
+  createdById            String?  @map("created_by") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User?    @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  samples    Sample[]
+  tests      Test[]
+  waterTests WaterTest[]
+
+  @@unique([tenantId, projectCode])
+  @@map("projects")
+}
+
+// ---------------------------------------------------------------------------
+// 4. Samples
+// ---------------------------------------------------------------------------
+
+model Sample {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  sampleCode      String   @map("sample_code") @db.VarChar(100)
+  sampleType      String   @map("sample_type") @db.VarChar(100)
+  sampleDate      DateTime @map("sample_date") @db.Date
+  receivedDate    DateTime? @map("received_date") @db.Date
+  sampledBy       String?  @map("sampled_by") @db.VarChar(255)
+  sampleLocation  String?  @map("sample_location") @db.VarChar(500)
+  /// PostGIS POINT — kept as text in Prisma; the migration creates a real
+  /// `point` column and a btree index for spatial queries.
+  gpsCoordinates  String?  @map("gps_coordinates")
+  description     String?
+  status          String   @default("pending") @db.VarChar(50)
+  chainOfCustody  Json?    @map("chain_of_custody")
+  createdById     String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project    Project     @relation(fields: [projectId], references: [id])
+  createdBy  User?       @relation("SampleCreatedBy", fields: [createdById], references: [id])
+  tests      Test[]
+  waterTests WaterTest[]
+
+  @@unique([tenantId, sampleCode])
+  @@map("samples")
+}
+
+// ---------------------------------------------------------------------------
+// 5. Tests
+// ---------------------------------------------------------------------------
+
+model Test {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
+  sampleId              String    @map("sample_id") @db.Uuid
+  projectId             String    @map("project_id") @db.Uuid
+  testType              String    @map("test_type") @db.VarChar(100)
+  testCode              String    @map("test_code") @db.VarChar(100)
+  standardBody          String?   @map("standard_body") @db.VarChar(50)
+  standardNumber        String?   @map("standard_number") @db.VarChar(50)
+  testDate              DateTime? @map("test_date") @db.Date
+  testedById            String?   @map("tested_by") @db.Uuid
+  reviewedById          String?   @map("reviewed_by") @db.Uuid
+  approvedById          String?   @map("approved_by") @db.Uuid
+  status                String    @default("pending") @db.VarChar(50)
+  inputData             Json      @map("input_data")
+  calculatedResults     Json?     @map("calculated_results")
+  passFailStatus        String?   @map("pass_fail_status") @db.VarChar(20)
+  remarks               String?
+  equipmentId           String?   @map("equipment_id") @db.Uuid
+  attachmentUrls        String[]  @default([]) @map("attachment_urls")
+  weatherConditions     Json?     @map("weather_conditions")
+  calibrationVerified   Boolean   @default(false) @map("calibration_verified")
+  completedAt           DateTime? @map("completed_at") @db.Timestamptz
+  reviewedAt            DateTime? @map("reviewed_at") @db.Timestamptz
+  approvedAt            DateTime? @map("approved_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sample     Sample     @relation(fields: [sampleId], references: [id])
+  project    Project    @relation(fields: [projectId], references: [id])
+  testedBy   User?      @relation("TestTestedBy",   fields: [testedById],   references: [id])
+  reviewedBy User?      @relation("TestReviewedBy", fields: [reviewedById], references: [id])
+  approvedBy User?      @relation("TestApprovedBy", fields: [approvedById], references: [id])
+  equipment  Equipment? @relation(fields: [equipmentId], references: [id])
+  reports    Report[]
+
+  @@index([tenantId, sampleId], name: "idx_tests_tenant_sample")
+  @@index([tenantId, status],   name: "idx_tests_tenant_status")
+  @@index([tenantId, testDate], name: "idx_tests_tenant_date")
+  @@index([tenantId, testType], name: "idx_tests_tenant_type")
+  @@map("tests")
+}
+
+// ---------------------------------------------------------------------------
+// 6. Test Templates (definition catalog — global + per-tenant overrides)
+// ---------------------------------------------------------------------------
+
+model TestTemplate {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String?  @map("tenant_id") @db.Uuid
+  testCategory        String   @map("test_category") @db.VarChar(100)
+  testName            String   @map("test_name") @db.VarChar(255)
+  testCode            String   @map("test_code") @db.VarChar(100)
+  standardBody        String?  @map("standard_body") @db.VarChar(50)
+  standardNumber      String?  @map("standard_number") @db.VarChar(50)
+  version             String?  @db.VarChar(20)
+  description         String?
+  inputFields         Json     @map("input_fields")
+  calculationLogic    Json     @map("calculation_logic")
+  validationRules     Json     @map("validation_rules")
+  outputFields        Json     @map("output_fields")
+  passFailCriteria    Json     @map("pass_fail_criteria")
+  graphConfig         Json?    @map("graph_config")
+  reportTemplatePath  String?  @map("report_template_path") @db.VarChar(500)
+  workflowConfig      Json?    @map("workflow_config")
+  equipmentConfig     Json?    @map("equipment_config")
+  isSaudiSpecific     Boolean  @default(false) @map("is_saudi_specific")
+  isActive            Boolean  @default(true) @map("is_active")
+  isCustom            Boolean  @default(false) @map("is_custom")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("test_templates")
+}
+
+// ---------------------------------------------------------------------------
+// 7. Water Tests (separate table — spec §6 H category)
+// ---------------------------------------------------------------------------
+
+model WaterTest {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
+  sampleId              String?   @map("sample_id") @db.Uuid
+  projectId             String?   @map("project_id") @db.Uuid
+  waterSourceType       String    @map("water_source_type") @db.VarChar(50)
+  testPurpose           String?   @map("test_purpose") @db.VarChar(100)
+  collectionDate        DateTime  @map("collection_date") @db.Timestamptz
+  collectionLocation    String?   @map("collection_location") @db.VarChar(500)
+  samplingMethod        String?   @map("sampling_method") @db.VarChar(100)
+  testedById            String?   @map("tested_by") @db.Uuid
+  reviewedById          String?   @map("reviewed_by") @db.Uuid
+  approvedById          String?   @map("approved_by") @db.Uuid
+  status                String    @default("pending") @db.VarChar(50)
+  inputData             Json      @map("input_data")
+  calculatedResults     Json?     @map("calculated_results")
+  passFailStatus        String?   @map("pass_fail_status") @db.VarChar(20)
+  complianceStandard    String?   @map("compliance_standard") @db.VarChar(50)
+  remarks               String?
+  equipmentId           String?   @map("equipment_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sample    Sample?    @relation(fields: [sampleId], references: [id])
+  project   Project?   @relation(fields: [projectId], references: [id])
+  testedBy  User?      @relation("WaterTestTestedBy", fields: [testedById], references: [id])
+  equipment Equipment? @relation(fields: [equipmentId], references: [id])
+
+  @@index([tenantId], name: "idx_water_tests_tenant")
+  @@map("water_tests")
+}
+
+// ---------------------------------------------------------------------------
+// 8. Equipment
+// ---------------------------------------------------------------------------
+
+model Equipment {
+  id                          String    @id @default(uuid()) @db.Uuid
+  tenantId                    String    @map("tenant_id") @db.Uuid
+  equipmentCode               String    @map("equipment_code") @db.VarChar(100)
+  equipmentName               String    @map("equipment_name") @db.VarChar(255)
+  equipmentType               String?   @map("equipment_type") @db.VarChar(100)
+  manufacturer                String?   @db.VarChar(255)
+  model                       String?   @db.VarChar(100)
+  serialNumber                String?   @map("serial_number") @db.VarChar(100)
+  calibrationDate             DateTime? @map("calibration_date") @db.Date
+  calibrationDueDate          DateTime? @map("calibration_due_date") @db.Date
+  calibrationCertificateUrl   String?   @map("calibration_certificate_url") @db.VarChar(500)
+  calibrationIntervalMonths   Int       @default(12) @map("calibration_interval_months")
+  accuracyClass               String?   @map("accuracy_class") @db.VarChar(50)
+  measurementRange            String?   @map("measurement_range") @db.VarChar(100)
+  status                      String    @default("active") @db.VarChar(50)
+  location                    String?   @db.VarChar(255)
+  apiEndpoint                 String?   @map("api_endpoint") @db.VarChar(500)
+  apiKeyEncrypted             String?   @map("api_key_encrypted")
+  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tests      Test[]
+  waterTests WaterTest[]
+
+  @@unique([tenantId, equipmentCode])
+  @@map("equipment")
+}
+
+// ---------------------------------------------------------------------------
+// 9. Audit Logs (immutable — RLS enforces append-only)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  userEmail   String?  @map("user_email") @db.VarChar(255)
+  action      String   @db.VarChar(100)
+  entityType  String   @map("entity_type") @db.VarChar(100)
+  entityId    String   @map("entity_id") @db.Uuid
+  oldValues   Json?    @map("old_values")
+  newValues   Json?    @map("new_values")
+  ipAddress   String?  @map("ip_address") @db.Inet
+  userAgent   String?  @map("user_agent")
+  /// SHA-256 hash chain — prevHash + canonical(self).
+  prevHash    String?  @map("prev_hash") @db.VarChar(64)
+  hash        String?  @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entityType], name: "idx_audit_logs_tenant")
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// 10. Reports
+// ---------------------------------------------------------------------------
+
+model Report {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  testId              String?  @map("test_id") @db.Uuid
+  waterTestId         String?  @map("water_test_id") @db.Uuid
+  reportNumber        String   @map("report_number") @db.VarChar(100)
+  reportType          String?  @map("report_type") @db.VarChar(50)
+  fileUrl             String?  @map("file_url") @db.VarChar(500)
+  fileSize            Int?     @map("file_size")
+  generatedById       String?  @map("generated_by") @db.Uuid
+  generatedAt         DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  digitalSignature    Json?    @map("digital_signature")
+  verificationQrCode  String?  @map("verification_qr_code") @db.VarChar(500)
+  status              String   @default("draft") @db.VarChar(50)
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  test        Test?  @relation(fields: [testId], references: [id])
+  generatedBy User?  @relation("ReportGeneratedBy", fields: [generatedById], references: [id])
+
+  @@map("reports")
+}
