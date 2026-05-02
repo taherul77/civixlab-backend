@@ -15,6 +15,7 @@ import { userRoutes } from "@/routes/users";
 import { auditRoutes } from "@/routes/audit";
 import { dashboardRoutes } from "@/routes/dashboard";
 import { reportRoutes } from "@/routes/reports";
+import { tenantRoutes } from "@/routes/tenant";
 
 async function build() {
   const app = Fastify({
@@ -43,6 +44,7 @@ async function build() {
   await app.register(auditRoutes);
   await app.register(dashboardRoutes);
   await app.register(reportRoutes);
+  await app.register(tenantRoutes);
 
   return app;
 }

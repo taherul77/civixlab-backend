@@ -22,15 +22,12 @@ CREATE TABLE "tenants" (
 -- CreateTable
 CREATE TABLE "users" (
     "id" UUID NOT NULL,
-    "tenant_id" UUID NOT NULL,
     "email" VARCHAR(255) NOT NULL,
     "password_hash" VARCHAR(255),
     "first_name" VARCHAR(100),
     "last_name" VARCHAR(100),
     "phone" VARCHAR(50),
     "iqama_number" VARCHAR(20),
-    "role" VARCHAR(50) NOT NULL,
-    "department" VARCHAR(100),
     "signature_url" VARCHAR(500),
     "digital_certificate_id" VARCHAR(100),
     "is_active" BOOLEAN NOT NULL DEFAULT true,
@@ -41,6 +38,18 @@ CREATE TABLE "users" (
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "user_tenant_memberships" (
+    "user_id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "role" VARCHAR(50) NOT NULL,
+    "department" VARCHAR(100),
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "user_tenant_memberships_pkey" PRIMARY KEY ("user_id", "tenant_id")
 );
 
 -- CreateTable
@@ -241,10 +250,13 @@ CREATE TABLE "reports" (
 CREATE UNIQUE INDEX "tenants_subdomain_key" ON "tenants"("subdomain");
 
 -- CreateIndex
-CREATE INDEX "idx_users_tenant_email" ON "users"("tenant_id", "email");
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_tenant_id_email_key" ON "users"("tenant_id", "email");
+CREATE INDEX "idx_memberships_tenant" ON "user_tenant_memberships"("tenant_id");
+
+-- CreateIndex
+CREATE INDEX "idx_memberships_user" ON "user_tenant_memberships"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "projects_tenant_id_project_code_key" ON "projects"("tenant_id", "project_code");
@@ -274,7 +286,10 @@ CREATE UNIQUE INDEX "equipment_tenant_id_equipment_code_key" ON "equipment"("ten
 CREATE INDEX "idx_audit_logs_tenant" ON "audit_logs"("tenant_id", "entity_type");
 
 -- AddForeignKey
-ALTER TABLE "users" ADD CONSTRAINT "users_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "user_tenant_memberships" ADD CONSTRAINT "user_tenant_memberships_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_tenant_memberships" ADD CONSTRAINT "user_tenant_memberships_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "projects" ADD CONSTRAINT "projects_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -345,43 +360,35 @@ ALTER TABLE "reports" ADD CONSTRAINT "reports_test_id_fkey" FOREIGN KEY ("test_i
 -- AddForeignKey
 ALTER TABLE "reports" ADD CONSTRAINT "reports_generated_by_fkey" FOREIGN KEY ("generated_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- Row-Level Security policies — spec §3 tenant isolation.
--- Run by `prisma migrate deploy` (or `prisma migrate dev`) after the
--- generated table definitions have been applied.
---
--- Strategy: every tenant-owned table has an RLS policy that filters by the
--- `app.current_tenant` GUC. The API service sets this per request via:
---
---     SET LOCAL app.current_tenant = '<tenant-uuid>';
---
--- Any query that omits the GUC sees zero rows from these tables.
+-- ---------------------------------------------------------------------------
+-- Row-Level Security policies — tenant isolation.
+-- The API service sets `app.current_tenant` per request via withTenant().
+-- The `users` table is NO LONGER tenant-isolated (users are global); access
+-- to a user inside a tenant context must go through user_tenant_memberships.
+-- NOTE: queries against RLS-protected tables MUST run inside withTenant()
+-- or they will error with "unrecognized configuration parameter".
+-- ---------------------------------------------------------------------------
 
--- A safe no-op default so admin tools don't crash when GUC is unset.
-ALTER DATABASE civixlab SET app.current_tenant TO '00000000-0000-0000-0000-000000000000';
+ALTER TABLE user_tenant_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE samples                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tests                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE water_tests             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE equipment               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE test_templates          ENABLE ROW LEVEL SECURITY;
 
--- Enable RLS on every tenant-owned table.
-ALTER TABLE users          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE projects       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE samples        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tests          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE water_tests    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE equipment      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reports        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_logs     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE test_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_memberships    ON user_tenant_memberships USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_projects       ON projects                USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_samples        ON samples                 USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_tests          ON tests                   USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_water_tests    ON water_tests             USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_equipment      ON equipment               USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_reports        ON reports                 USING (tenant_id = current_setting('app.current_tenant')::uuid);
+CREATE POLICY tenant_isolation_audit_logs     ON audit_logs              USING (tenant_id = current_setting('app.current_tenant')::uuid);
 
--- One policy per table — same shape, different table.
-CREATE POLICY tenant_isolation_users          ON users          USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_projects       ON projects       USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_samples        ON samples        USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_tests          ON tests          USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_water_tests    ON water_tests    USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_equipment      ON equipment      USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_reports        ON reports        USING (tenant_id = current_setting('app.current_tenant')::uuid);
-CREATE POLICY tenant_isolation_audit_logs     ON audit_logs     USING (tenant_id = current_setting('app.current_tenant')::uuid);
-
--- Test templates are slightly different — global rows (tenant_id NULL) are
--- visible to everyone; tenant-specific rows follow the standard policy.
+-- Test templates: global rows (tenant_id NULL) visible to all; tenant rows isolated.
 CREATE POLICY tenant_isolation_test_templates
   ON test_templates
   USING (tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant')::uuid);
