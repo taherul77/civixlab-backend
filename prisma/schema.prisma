@@ -44,8 +44,36 @@ model Tenant {
   reports     Report[]
   templates   TestTemplate[]
   auditLogs   AuditLog[]
+  rolePagePermissions RolePagePermission[]
+  laboratories Laboratory[]
+  tenantRoles  TenantRole[]
 
   @@map("tenants")
+}
+
+// One company can run multiple physical labs (e.g. main lab + branch lab).
+// RLS-isolated by tenant_id so a Tenant Admin only sees their own company's labs.
+model Laboratory {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  code                String   @db.VarChar(100)
+  name                String   @db.VarChar(255)
+  accreditation       String?  @db.VarChar(255)
+  accreditationNumber String?  @map("accreditation_number") @db.VarChar(100)
+  defaultStandardBody String   @default("ASTM") @map("default_standard_body") @db.VarChar(20)
+  reportPrefix        String   @default("RPT") @map("report_prefix") @db.VarChar(20)
+  sampleCodePrefix    String   @default("S")   @map("sample_code_prefix") @db.VarChar(20)
+  departments         String[] @default([])
+  disciplines         String[] @default([])
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code], name: "uniq_lab_per_tenant_code")
+  @@index([tenantId], name: "idx_laboratories_tenant")
+  @@map("laboratories")
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +91,7 @@ model User {
   signatureUrl          String?   @map("signature_url") @db.VarChar(500)
   digitalCertificateId  String?   @map("digital_certificate_id") @db.VarChar(100)
   isActive              Boolean   @default(true) @map("is_active")
+  isSuperAdmin          Boolean   @default(false) @map("is_super_admin")
   mfaEnabled            Boolean   @default(false) @map("mfa_enabled")
   mfaSecret             String?   @map("mfa_secret") @db.VarChar(255)
   mfaRecoveryCodes      String[]  @default([]) @map("mfa_recovery_codes")
@@ -79,6 +108,44 @@ model User {
   reportsGenerated Report[]    @relation("ReportGeneratedBy")
 
   @@map("users")
+}
+
+// Per-tenant, per-role page action grants. Drives both the sidebar visibility
+// (rows where view = false hide that page from the role) and the in-page
+// create/edit/delete affordances. RLS-isolated by tenant.
+model RolePagePermission {
+  tenantId  String   @map("tenant_id") @db.Uuid
+  role      String   @db.VarChar(100)
+  pageId    String   @map("page_id") @db.VarChar(100)
+  view      Boolean  @default(false)
+  create    Boolean  @default(false)
+  edit      Boolean  @default(false)
+  delete    Boolean  @default(false)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, role, pageId])
+  @@index([tenantId, role], name: "idx_role_page_perms_tenant_role")
+  @@map("role_page_permissions")
+}
+
+// Per-tenant role definitions for the Role Management UI. Each tenant gets
+// its own copy of the built-in roles (seeded on first read) plus any custom
+// roles they define. `permissions` stores the resource:action strings used by
+// the rbac.ts client (e.g. "test:create", "settings:write"). RLS-isolated.
+model TenantRole {
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  permissions String[] @default([])
+  isCustom    Boolean  @default(false) @map("is_custom")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, name])
+  @@index([tenantId], name: "idx_tenant_roles_tenant")
+  @@map("tenant_roles")
 }
 
 // Join table — one user can belong to many tenants (companies/clients).

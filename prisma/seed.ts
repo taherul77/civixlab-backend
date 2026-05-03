@@ -30,6 +30,20 @@ async function main() {
 
   const passwordHash = await bcrypt.hash("demo1234!", 12);
 
+  // Super Admin — global user, no memberships. Manages tenants via /v1/super/*.
+  await prisma.user.upsert({
+    where: { email: "super@civix.sa" },
+    update: { isSuperAdmin: true, isActive: true },
+    create: {
+      email: "super@civix.sa",
+      passwordHash,
+      firstName: "Civix",
+      lastName: "Super",
+      isSuperAdmin: true,
+      isActive: true,
+    },
+  });
+
   // Each entry: one user (global), and a list of (tenant, role) memberships.
   const seeds: Array<{
     email: string;
@@ -78,6 +92,7 @@ async function main() {
 
   console.log(`Seeded tenants: ${aramco.subdomain}, ${sabic.subdomain}`);
   console.log(`Seeded ${seeds.length} users + memberships.`);
+  console.log(`Super Admin: super@civix.sa (manages all tenants)`);
   console.log(`Demo password for every user: demo1234!`);
   console.log(`Cross-tenant demo: consultant@civix.sa belongs to BOTH tenants.`);
 }

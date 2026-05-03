@@ -13,11 +13,13 @@ declare module "fastify" {
       role: string;
       permissions: string[];
       mfaVerified: boolean;
+      isSuperAdmin: boolean;
     } | null;
   }
   interface FastifyInstance {
     requireAuth: (req: FastifyRequest) => Promise<void>;
     requirePerm: (perm: string) => (req: FastifyRequest) => Promise<void>;
+    requireSuperAdmin: (req: FastifyRequest) => Promise<void>;
   }
 }
 
@@ -33,19 +35,21 @@ export const authPlugin = fp(async function (app: FastifyInstance) {
     try {
       const decoded = await req.jwtVerify<{
         sub: string;
-        tenant_id: string;
+        tenant_id?: string;
         email: string;
-        role: string;
+        role?: string;
         permissions?: string[];
         mfa_verified?: boolean;
+        is_super_admin?: boolean;
       }>();
       req.actor = {
         sub: decoded.sub,
-        tenantId: decoded.tenant_id,
+        tenantId: decoded.tenant_id ?? "",
         email: decoded.email,
-        role: decoded.role,
+        role: decoded.role ?? "",
         permissions: decoded.permissions ?? [],
         mfaVerified: !!decoded.mfa_verified,
+        isSuperAdmin: !!decoded.is_super_admin,
       };
     } catch {
       const err: Error & { statusCode?: number } = new Error("UNAUTHENTICATED: Invalid or missing JWT");
@@ -56,8 +60,24 @@ export const authPlugin = fp(async function (app: FastifyInstance) {
 
   app.decorate("requirePerm", (perm: string) => async (req: FastifyRequest) => {
     await app.requireAuth(req);
-    if (!req.actor || !req.actor.permissions.includes(perm)) {
+    if (!req.actor) {
+      const err: Error & { statusCode?: number } = new Error("UNAUTHENTICATED");
+      err.statusCode = 401;
+      throw err;
+    }
+    // Super Admin bypasses all per-permission checks.
+    if (req.actor.isSuperAdmin) return;
+    if (!req.actor.permissions.includes(perm)) {
       const err: Error & { statusCode?: number } = new Error(`FORBIDDEN: ${perm}`);
+      err.statusCode = 403;
+      throw err;
+    }
+  });
+
+  app.decorate("requireSuperAdmin", async (req: FastifyRequest) => {
+    await app.requireAuth(req);
+    if (!req.actor?.isSuperAdmin) {
+      const err: Error & { statusCode?: number } = new Error("FORBIDDEN: Super Admin only");
       err.statusCode = 403;
       throw err;
     }

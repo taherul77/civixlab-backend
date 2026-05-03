@@ -16,6 +16,10 @@ import { auditRoutes } from "@/routes/audit";
 import { dashboardRoutes } from "@/routes/dashboard";
 import { reportRoutes } from "@/routes/reports";
 import { tenantRoutes } from "@/routes/tenant";
+import { rolePermissionsRoutes } from "@/routes/role-permissions";
+import { rolesRoutes } from "@/routes/roles";
+import { superRoutes } from "@/routes/super";
+import { laboratoriesRoutes } from "@/routes/laboratories";
 
 async function build() {
   const app = Fastify({
@@ -45,6 +49,10 @@ async function build() {
   await app.register(dashboardRoutes);
   await app.register(reportRoutes);
   await app.register(tenantRoutes);
+  await app.register(rolePermissionsRoutes);
+  await app.register(rolesRoutes);
+  await app.register(superRoutes);
+  await app.register(laboratoriesRoutes);
 
   return app;
 }
