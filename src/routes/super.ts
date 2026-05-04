@@ -19,6 +19,18 @@ const CreateTenantBody = z.object({
   }),
 });
 
+const UpdateTenantBody = z.object({
+  name:                   z.string().min(1).max(255).optional(),
+  subdomain:              z.string().min(1).max(100).regex(/^[a-z0-9-]+$/).optional(),
+  crNumber:               z.string().max(50).nullable().optional(),
+  vatNumber:              z.string().max(50).nullable().optional(),
+  subscriptionTier:       z.enum(["starter", "professional", "enterprise"]).optional(),
+  subscriptionStatus:     z.enum(["active", "suspended", "cancelled"]).optional(),
+  saudiComplianceEnabled: z.boolean().optional(),
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const TENANT_SAFE_SELECT = {
   id: true, name: true, subdomain: true, logoUrl: true,
   crNumber: true, vatNumber: true,
@@ -123,5 +135,111 @@ export async function superRoutes(app: FastifyInstance) {
         roles:  result.membership.roles,
       },
     };
+  });
+
+  // Get a single tenant + a quick membership count.
+  app.get("/v1/super/tenants/:id", { onRequest: [app.requireSuperAdmin] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!UUID_RE.test(id)) {
+      return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid tenant id" } });
+    }
+    const tenant = await prisma.tenant.findUnique({
+      where: { id },
+      select: { ...TENANT_SAFE_SELECT, _count: { select: { memberships: true } } },
+    });
+    if (!tenant) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
+    return {
+      ...tenant,
+      memberCount: tenant._count.memberships,
+      createdAt: tenant.createdAt.toISOString(),
+      updatedAt: tenant.updatedAt.toISOString(),
+    };
+  });
+
+  // Update tenant profile fields. Subdomain rename is allowed but checked
+  // against the global unique index. Member count is read-only.
+  app.put("/v1/super/tenants/:id", { onRequest: [app.requireSuperAdmin] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!UUID_RE.test(id)) {
+      return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid tenant id" } });
+    }
+    const body = UpdateTenantBody.parse(req.body);
+    const found = await prisma.tenant.findUnique({ where: { id } });
+    if (!found) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
+
+    if (body.subdomain && body.subdomain !== found.subdomain) {
+      const dup = await prisma.tenant.findUnique({ where: { subdomain: body.subdomain } });
+      if (dup) {
+        return reply.status(409).send({ error: { code: "CONFLICT", message: "Subdomain already taken" } });
+      }
+    }
+
+    const updated = await prisma.tenant.update({
+      where: { id },
+      data: body,
+      select: { ...TENANT_SAFE_SELECT, _count: { select: { memberships: true } } },
+    });
+    return {
+      ...updated,
+      memberCount: updated._count.memberships,
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+  });
+
+  // List the members of one tenant. Super-admin only — bypasses the usual
+  // tenant-scoped /v1/users endpoint so a platform admin can audit any
+  // company without first switching into it.
+  app.get("/v1/super/tenants/:id/members", { onRequest: [app.requireSuperAdmin] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!UUID_RE.test(id)) {
+      return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid tenant id" } });
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id }, select: { id: true } });
+    if (!tenant) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
+
+    const memberships = await prisma.userTenantMembership.findMany({
+      where: { tenantId: id },
+      include: {
+        user: {
+          select: {
+            id: true, email: true, firstName: true, lastName: true, phone: true,
+            isActive: true, mfaEnabled: true, lastLoginAt: true, createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      items: memberships.map((m) => ({
+        id:               m.user.id,
+        email:            m.user.email,
+        firstName:        m.user.firstName,
+        lastName:         m.user.lastName,
+        phone:            m.user.phone,
+        roles:            m.roles,
+        department:       m.department,
+        isActive:         m.user.isActive,
+        membershipActive: m.isActive,
+        mfaEnabled:       m.user.mfaEnabled,
+        lastLoginAt:      m.user.lastLoginAt ? m.user.lastLoginAt.toISOString() : null,
+        joinedAt:         m.createdAt.toISOString(),
+      })),
+      total: memberships.length,
+    };
+  });
+
+  // Delete a tenant. ON DELETE CASCADE on the related rows (memberships,
+  // roles, projects, samples, tests, …) cleans everything tenant-scoped up.
+  app.delete("/v1/super/tenants/:id", { onRequest: [app.requireSuperAdmin] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!UUID_RE.test(id)) {
+      return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid tenant id" } });
+    }
+    const found = await prisma.tenant.findUnique({ where: { id } });
+    if (!found) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
+    await prisma.tenant.delete({ where: { id } });
+    reply.code(204);
   });
 }
