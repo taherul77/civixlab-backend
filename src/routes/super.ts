@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/db/prisma";
+import { BUILT_IN_ROLE_TEMPLATES, rolePermissions } from "@/lib/rbac";
 
 const CreateTenantBody = z.object({
   name:      z.string().min(1).max(255),
@@ -88,6 +89,21 @@ export async function superRoutes(app: FastifyInstance) {
         where:  { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
         create: { userId: user.id, tenantId: tenant.id, role: "Tenant Admin" },
         update: { role: "Tenant Admin", isActive: true },
+      });
+
+      // Materialise the platform roles in the new tenant's `roles` table so
+      // they show up immediately in Settings → Roles instead of waiting
+      // for the lazy auto-seed on first sign-in.
+      await tx.role.createMany({
+        data: BUILT_IN_ROLE_TEMPLATES.map((name) => ({
+          tenantId:    tenant.id,
+          name,
+          permissions: rolePermissions(name) as string[],
+          isCustom:    false,
+          createdById: req.actor?.sub,
+          updatedById: req.actor?.sub,
+        })),
+        skipDuplicates: true,
       });
 
       return { tenant, user, membership };

@@ -46,7 +46,7 @@ model Tenant {
   auditLogs   AuditLog[]
   rolePagePermissions RolePagePermission[]
   laboratories Laboratory[]
-  tenantRoles  TenantRole[]
+  roles        Role[]
 
   @@map("tenants")
 }
@@ -106,6 +106,8 @@ model User {
   testsApproved    Test[]      @relation("TestApprovedBy")
   waterTested      WaterTest[] @relation("WaterTestTestedBy")
   reportsGenerated Report[]    @relation("ReportGeneratedBy")
+  rolesCreated     Role[]      @relation("RoleCreatedBy")
+  rolesUpdated     Role[]      @relation("RoleUpdatedBy")
 
   @@map("users")
 }
@@ -130,22 +132,29 @@ model RolePagePermission {
   @@map("role_page_permissions")
 }
 
-// Per-tenant role definitions for the Role Management UI. Each tenant gets
-// its own copy of the built-in roles (seeded on first read) plus any custom
-// roles they define. `permissions` stores the resource:action strings used by
-// the rbac.ts client (e.g. "test:create", "settings:write"). RLS-isolated.
-model TenantRole {
+// Tenant-scoped roles with audit metadata. Each row carries a UUID id (so
+// the API can reference roles by stable id even when a name is renamed),
+// the tenant it belongs to, the permission strings the rbac.ts client uses
+// (e.g. "test:create"), and createdBy / updatedBy pointers to the User who
+// last touched it. RLS-isolated by tenant.
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   name        String   @db.VarChar(100)
   permissions String[] @default([])
-  isCustom    Boolean  @default(false) @map("is_custom")
+  isCustom    Boolean  @default(true) @map("is_custom")
+  createdById String?  @map("created_by") @db.Uuid
+  updatedById String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("RoleCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?  @relation("RoleUpdatedBy", fields: [updatedById], references: [id])
 
-  @@id([tenantId, name])
-  @@index([tenantId], name: "idx_tenant_roles_tenant")
-  @@map("tenant_roles")
+  @@unique([tenantId, name], name: "uniq_role_per_tenant_name")
+  @@index([tenantId], name: "idx_roles_tenant")
+  @@map("roles")
 }
 
 // Join table — one user can belong to many tenants (companies/clients).

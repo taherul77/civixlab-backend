@@ -13,32 +13,31 @@ async function resolveTenantPermissions(tenantId: string, role: string): Promise
     // Always full perms regardless of any stored row.
     return rolePermissions(role) as string[];
   }
-  let row = await prisma.tenantRole.findUnique({
-    where: { tenantId_name: { tenantId, name: role } },
-  });
-  if (!row) {
-    // Cold tenant — seed the full built-in template set so the Role
-    // Management UI and the JWT see the same data.
-    const existing = await prisma.tenantRole.findMany({
-      where: { tenantId }, select: { name: true },
-    });
-    const have = new Set(existing.map((r) => r.name));
-    const toCreate = BUILT_IN_ROLE_TEMPLATES
-      .filter((n) => !have.has(n))
-      .map((name) => ({
-        tenantId,
-        name,
-        permissions: rolePermissions(name) as string[],
-        isCustom: false,
-      }));
-    if (toCreate.length > 0) {
-      await prisma.tenantRole.createMany({ data: toCreate, skipDuplicates: true });
+  try {
+    let row = await prisma.role.findFirst({ where: { tenantId, name: role } });
+    if (!row) {
+      // Cold tenant — seed the Super Admin template (the only one we seed
+      // by default; every other role is created on demand by the tenant).
+      const have = new Set(
+        (await prisma.role.findMany({ where: { tenantId }, select: { name: true } })).map((r) => r.name),
+      );
+      const toCreate = BUILT_IN_ROLE_TEMPLATES
+        .filter((n) => !have.has(n))
+        .map((name) => ({
+          tenantId,
+          name,
+          permissions: rolePermissions(name) as string[],
+          isCustom: false,
+        }));
+      if (toCreate.length > 0) {
+        await prisma.role.createMany({ data: toCreate, skipDuplicates: true });
+      }
+      row = await prisma.role.findFirst({ where: { tenantId, name: role } });
     }
-    row = await prisma.tenantRole.findUnique({
-      where: { tenantId_name: { tenantId, name: role } },
-    });
+    return row?.permissions ?? (rolePermissions(role) as string[]);
+  } catch {
+    return rolePermissions(role) as string[];
   }
-  return row?.permissions ?? (rolePermissions(role) as string[]);
 }
 
 const SignInBody = z.object({

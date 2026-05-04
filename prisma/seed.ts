@@ -4,33 +4,29 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  // Two demo tenants so we can prove a user with multiple memberships works.
-  const aramco = await prisma.tenant.upsert({
-    where: { subdomain: "aramco-lab" },
-    update: {},
-    create: {
-      name: "Saudi Aramco Materials Lab",
-      subdomain: "aramco-lab",
-      crNumber: "1010-700001",
-      vatNumber: "300100000000003",
-      subscriptionTier: "enterprise",
-    },
-  });
+  // Wipe every tenant-owned table explicitly, in FK-safe dependency order,
+  // then drop every non-super user. Cascades would catch most of this, but
+  // an explicit pass guarantees no row anywhere survives.
+  const counts: Record<string, number> = {};
+  counts.auditLog              = (await prisma.auditLog.deleteMany({})).count;
+  counts.report                = (await prisma.report.deleteMany({})).count;
+  counts.waterTest             = (await prisma.waterTest.deleteMany({})).count;
+  counts.test                  = (await prisma.test.deleteMany({})).count;
+  counts.testTemplate          = (await prisma.testTemplate.deleteMany({})).count;
+  counts.sample                = (await prisma.sample.deleteMany({})).count;
+  counts.project               = (await prisma.project.deleteMany({})).count;
+  counts.equipment             = (await prisma.equipment.deleteMany({})).count;
+  counts.laboratory            = (await prisma.laboratory.deleteMany({})).count;
+  // Drop every roles row — the Super Admin template re-seeds itself when
+  // a user signs into the tenant. Wipes audit data along with it.
+  counts.role                  = (await prisma.role.deleteMany({})).count;
+  counts.rolePagePermission    = (await prisma.rolePagePermission.deleteMany({})).count;
+  counts.userTenantMembership  = (await prisma.userTenantMembership.deleteMany({})).count;
+  counts.tenant                = (await prisma.tenant.deleteMany({})).count;
+  counts.user                  = (await prisma.user.deleteMany({ where: { isSuperAdmin: false } })).count;
 
-  const sabic = await prisma.tenant.upsert({
-    where: { subdomain: "sabic-lab" },
-    update: {},
-    create: {
-      name: "SABIC Quality Lab",
-      subdomain: "sabic-lab",
-      crNumber: "1010-700002",
-      subscriptionTier: "professional",
-    },
-  });
-
+  // Re-create / ensure the Super Admin exists.
   const passwordHash = await bcrypt.hash("demo1234!", 12);
-
-  // Super Admin — global user, no memberships. Manages tenants via /v1/super/*.
   await prisma.user.upsert({
     where: { email: "super@civix.sa" },
     update: { isSuperAdmin: true, isActive: true },
@@ -44,57 +40,8 @@ async function main() {
     },
   });
 
-  // Each entry: one user (global), and a list of (tenant, role) memberships.
-  const seeds: Array<{
-    email: string;
-    firstName: string;
-    lastName: string;
-    memberships: Array<{ tenantId: string; role: string }>;
-  }> = [
-    { email: "fahad@aramco-lab.sa",  firstName: "Fahad",    lastName: "Al-Otaibi", memberships: [{ tenantId: aramco.id, role: "Lab Engineer" }] },
-    { email: "sarah@aramco-lab.sa",  firstName: "Sarah",    lastName: "Mansour",   memberships: [{ tenantId: aramco.id, role: "Project Manager" }] },
-    { email: "ahmed@aramco-lab.sa",  firstName: "Ahmed",    lastName: "Hassan",    memberships: [{ tenantId: aramco.id, role: "Lab Technician" }] },
-    { email: "rashid@aramco-lab.sa", firstName: "Abdullah", lastName: "Al-Rashid", memberships: [{ tenantId: aramco.id, role: "Approver" }] },
-    { email: "layla@aramco-lab.sa",  firstName: "Layla",    lastName: "Hashem",    memberships: [{ tenantId: aramco.id, role: "Quality Manager" }] },
-    { email: "admin@aramco-lab.sa",  firstName: "Tenant",   lastName: "Admin",     memberships: [{ tenantId: aramco.id, role: "Tenant Admin" }] },
-    // Cross-tenant user — proves the shared-user feature.
-    {
-      email: "consultant@civix.sa",
-      firstName: "Omar",
-      lastName: "Consultant",
-      memberships: [
-        { tenantId: aramco.id, role: "Lab Engineer" },
-        { tenantId: sabic.id,  role: "Quality Manager" },
-      ],
-    },
-  ];
-
-  for (const s of seeds) {
-    const user = await prisma.user.upsert({
-      where: { email: s.email },
-      update: {},
-      create: {
-        email: s.email,
-        passwordHash,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        isActive: true,
-      },
-    });
-    for (const m of s.memberships) {
-      await prisma.userTenantMembership.upsert({
-        where: { userId_tenantId: { userId: user.id, tenantId: m.tenantId } },
-        update: { role: m.role, isActive: true },
-        create: { userId: user.id, tenantId: m.tenantId, role: m.role },
-      });
-    }
-  }
-
-  console.log(`Seeded tenants: ${aramco.subdomain}, ${sabic.subdomain}`);
-  console.log(`Seeded ${seeds.length} users + memberships.`);
-  console.log(`Super Admin: super@civix.sa (manages all tenants)`);
-  console.log(`Demo password for every user: demo1234!`);
-  console.log(`Cross-tenant demo: consultant@civix.sa belongs to BOTH tenants.`);
+  console.log("Cleared rows:", counts);
+  console.log("Super Admin ready: super@civix.sa (password: demo1234!)");
 }
 
 main()

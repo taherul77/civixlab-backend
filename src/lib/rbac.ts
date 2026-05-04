@@ -8,10 +8,13 @@ export type Role = string;
 export const SUPER_ADMIN_ROLE = "Super Admin";
 export const TENANT_ADMIN_ROLE = "Tenant Admin";
 
+// Roles that are auto-seeded into the `roles` table for every new tenant.
+// "Super Admin" and "Tenant Admin" are platform-protected (the API blocks
+// renames / deletes for those names). Every other role is created on
+// demand by the tenant via Role Management.
 export const BUILT_IN_ROLE_TEMPLATES = [
-  "Super Admin","Tenant Admin","Quality Manager","Project Manager",
-  "Lab Engineer","Lab Technician","Field Technician","Reviewer",
-  "Approver","Client","Billing Admin",
+  "Super Admin",
+  "Tenant Admin",
 ] as const;
 
 // Standard CRUD on every resource (`<resource>:read|create|update|delete`)
@@ -45,60 +48,12 @@ const ALL_PERMS_LIST: Permission[] = [
   "security:read","security:update",
 ];
 
+// Super Admin is the only role with a hardcoded permission set.
+// Tenant Admin is handled by rolePermissions() below (always full perms).
+// Every other role lives in the tenant_roles table and is created at
+// runtime by the tenant's admin via Role Management.
 const PERMS: Record<string, Permission[]> = {
   "Super Admin": ALL_PERMS_LIST,
-  "Tenant Admin": [
-    "test:read","test:update","test:delete",
-    "sample:read","sample:delete",
-    "project:create","project:read","project:update","project:delete",
-    "equipment:create","equipment:read","equipment:update","equipment:delete","equipment:calibrate",
-    "user:create","user:read","user:update","user:delete","user:invite",
-    "report:read","report:export",
-    "audit:read","audit:export",
-    "billing:create","billing:read","billing:update","billing:delete",
-    "settings:read","settings:update",
-    "whitelabel:read","whitelabel:update",
-    "security:read","security:update",
-  ],
-  "Quality Manager": [
-    "test:read","test:review","test:approve",
-    "sample:read","project:read",
-    "equipment:read",
-    "report:read","report:export",
-    "audit:read","audit:export",
-  ],
-  "Project Manager": [
-    "test:create","test:read","test:update","test:submit",
-    "sample:create","sample:read","sample:update",
-    "project:create","project:read","project:update",
-    "equipment:read","report:read","report:export",
-  ],
-  "Lab Engineer": [
-    "test:create","test:read","test:update","test:submit",
-    "sample:create","sample:read","sample:update",
-    "project:read","equipment:read","equipment:calibrate",
-    "report:read","report:export",
-  ],
-  "Lab Technician": [
-    "test:create","test:read","test:update","test:submit",
-    "sample:create","sample:read",
-    "project:read","equipment:read","report:read",
-  ],
-  "Field Technician": [
-    "sample:create","sample:read","project:read","equipment:read",
-  ],
-  "Reviewer": [
-    "test:read","test:review","sample:read","project:read","report:read",
-  ],
-  "Approver": [
-    "test:read","test:approve","test:sign","sample:read","project:read","report:read","report:export",
-  ],
-  "Client": [
-    "report:read",
-  ],
-  "Billing Admin": [
-    "billing:create","billing:read","billing:update","report:read",
-  ],
 };
 
 export function rolePermissions(role: string | null | undefined): Permission[] {
