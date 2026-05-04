@@ -62,6 +62,20 @@ export function rolePermissions(role: string | null | undefined): Permission[] {
   return PERMS[role] ?? [];
 }
 
+/** Union of permissions across multiple assigned roles. Order is preserved
+ *  by first occurrence and duplicates are removed. */
+export function rolesPermissions(roles: readonly string[] | null | undefined): Permission[] {
+  if (!roles || roles.length === 0) return [];
+  const seen = new Set<Permission>();
+  const out: Permission[] = [];
+  for (const r of roles) {
+    for (const p of rolePermissions(r)) {
+      if (!seen.has(p)) { seen.add(p); out.push(p); }
+    }
+  }
+  return out;
+}
+
 export function hasPermission(role: string | null | undefined, perm: Permission): boolean {
   return rolePermissions(role).includes(perm);
 }

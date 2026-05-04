@@ -80,20 +80,28 @@ model Laboratory {
 // Tenant-scoped departments. RLS-isolated by tenant_id so each company only
 // sees its own list. Used as the picker source for User membership.department,
 // Sample / Test department tags, and the Master Setup → Department setup page.
+//
+// `code` is auto-generated server-side (slug of name + short suffix); the
+// client never sets it. createdBy / updatedBy track which user touched the
+// row last so the table can show provenance.
 model Department {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   name        String   @db.VarChar(100)
-  code        String?  @db.VarChar(50)
+  code        String   @db.VarChar(50)
   description String?
-  manager     String?  @db.VarChar(255)
   isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by") @db.Uuid
+  updatedById String?  @map("updated_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("DepartmentCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?  @relation("DepartmentUpdatedBy", fields: [updatedById], references: [id])
 
   @@unique([tenantId, name], name: "uniq_dept_per_tenant_name")
+  @@unique([tenantId, code], name: "uniq_dept_per_tenant_code")
   @@index([tenantId], name: "idx_departments_tenant")
   @@map("departments")
 }
@@ -130,6 +138,8 @@ model User {
   reportsGenerated Report[]    @relation("ReportGeneratedBy")
   rolesCreated     Role[]      @relation("RoleCreatedBy")
   rolesUpdated     Role[]      @relation("RoleUpdatedBy")
+  deptsCreated     Department[] @relation("DepartmentCreatedBy")
+  deptsUpdated     Department[] @relation("DepartmentUpdatedBy")
 
   @@map("users")
 }
@@ -180,11 +190,13 @@ model Role {
 }
 
 // Join table — one user can belong to many tenants (companies/clients).
-// Role and department live here because they are per-company.
+// `roles` is an array because a user can hold multiple roles concurrently
+// for the same company (e.g. "Inspector" + "Lab Manager"); permissions
+// resolve to the union across all assigned roles. `department` is per-company.
 model UserTenantMembership {
   userId      String   @map("user_id") @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
-  role        String   @db.VarChar(50)
+  roles       String[] @default([])
   department  String?  @db.VarChar(100)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz

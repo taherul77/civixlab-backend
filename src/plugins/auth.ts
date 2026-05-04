@@ -5,12 +5,15 @@ import { env } from "@/config/env";
 
 declare module "fastify" {
   interface FastifyRequest {
-    /** Resolved actor — set by the `auth` decorator after JWT verification. */
+    /** Resolved actor — set by the `auth` decorator after JWT verification.
+     *  `role` is the primary (first) role for back-compat / display; `roles`
+     *  is the full list and `permissions` is their union. */
     actor: {
       sub: string;
       tenantId: string;
       email: string;
       role: string;
+      roles: string[];
       permissions: string[];
       mfaVerified: boolean;
       isSuperAdmin: boolean;
@@ -38,15 +41,18 @@ export const authPlugin = fp(async function (app: FastifyInstance) {
         tenant_id?: string;
         email: string;
         role?: string;
+        roles?: string[];
         permissions?: string[];
         mfa_verified?: boolean;
         is_super_admin?: boolean;
       }>();
+      const roles = decoded.roles ?? (decoded.role ? [decoded.role] : []);
       req.actor = {
         sub: decoded.sub,
         tenantId: decoded.tenant_id ?? "",
         email: decoded.email,
-        role: decoded.role ?? "",
+        role: decoded.role ?? roles[0] ?? "",
+        roles,
         permissions: decoded.permissions ?? [],
         mfaVerified: !!decoded.mfa_verified,
         isSuperAdmin: !!decoded.is_super_admin,

@@ -87,8 +87,8 @@ export async function superRoutes(app: FastifyInstance) {
 
       const membership = await tx.userTenantMembership.upsert({
         where:  { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
-        create: { userId: user.id, tenantId: tenant.id, role: "Tenant Admin" },
-        update: { role: "Tenant Admin", isActive: true },
+        create: { userId: user.id, tenantId: tenant.id, roles: ["Tenant Admin"] },
+        update: { roles: ["Tenant Admin"], isActive: true },
       });
 
       // Materialise the platform roles in the new tenant's `roles` table so
@@ -119,7 +119,8 @@ export async function superRoutes(app: FastifyInstance) {
       admin: {
         userId: result.user.id,
         email:  result.user.email,
-        role:   result.membership.role,
+        role:   result.membership.roles[0] ?? "",
+        roles:  result.membership.roles,
       },
     };
   });

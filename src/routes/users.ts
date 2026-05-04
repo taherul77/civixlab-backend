@@ -5,9 +5,12 @@ import { prisma, withTenant } from "@/db/prisma";
 import { appendAudit } from "@/lib/audit";
 import { userAgentOf, localPart } from "@/lib/req";
 
+// `roles` is the canonical list a membership holds. We accept the singular
+// `role` for back-compat with older clients and treat it as a one-element list.
 const InviteBody = z.object({
   email: z.string().email(),
-  role: z.string().min(1),
+  role:  z.string().min(1).optional(),
+  roles: z.array(z.string().min(1).max(100)).optional(),
   firstName: z.string().max(100).optional(),
   lastName: z.string().max(100).optional(),
   phone: z.string().max(50).optional(),
@@ -15,16 +18,30 @@ const InviteBody = z.object({
   department: z.string().max(100).optional(),
   // Temp password — only used when creating a brand-new user account.
   initialPassword: z.string().min(8).optional(),
+}).refine((b) => (b.roles && b.roles.length > 0) || !!b.role, {
+  message: "Either `role` or a non-empty `roles[]` must be provided",
+  path: ["roles"],
 });
 
 const UpdateMembershipBody = z.object({
   role:       z.string().min(1).max(100).optional(),
+  roles:      z.array(z.string().min(1).max(100)).optional(),
   department: z.string().max(100).nullable().optional(),
   isActive:   z.boolean().optional(),
   firstName:  z.string().max(100).optional(),
   lastName:   z.string().max(100).optional(),
   phone:      z.string().max(50).nullable().optional(),
 });
+
+function dedupeRoles(roles: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of roles) {
+    const v = r.trim();
+    if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  return out;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,7 +71,8 @@ export async function userRoutes(app: FastifyInstance) {
       });
       const items = memberships.map((m) => ({
         ...m.user,
-        role: m.role,
+        role: m.roles[0] ?? "",
+        roles: m.roles,
         department: m.department,
         membershipActive: m.isActive,
       }));
@@ -95,12 +113,19 @@ export async function userRoutes(app: FastifyInstance) {
       });
     }
 
+    const incomingRoles = dedupeRoles(body.roles ?? (body.role ? [body.role] : []));
+    if (incomingRoles.length === 0) {
+      return reply.status(400).send({
+        error: { code: "VALIDATION", message: "At least one role is required" },
+      });
+    }
+
     return withTenant(tenantId, async (tx) => {
       const membership = await tx.userTenantMembership.create({
         data: {
           userId: user!.id,
           tenantId,
-          role: body.role,
+          roles: incomingRoles,
           department: body.department,
         },
       });
@@ -114,7 +139,7 @@ export async function userRoutes(app: FastifyInstance) {
         entityId: user!.id,
         diff: [
           { field: "email", from: "—", to: user!.email },
-          { field: "role",  from: "—", to: membership.role },
+          { field: "roles", from: "—", to: membership.roles.join(", ") },
         ],
         ip: req.ip,
         userAgent: userAgentOf(req),
@@ -125,7 +150,8 @@ export async function userRoutes(app: FastifyInstance) {
         email: user!.email,
         firstName: user!.firstName,
         lastName: user!.lastName,
-        role: membership.role,
+        role: membership.roles[0] ?? "",
+        roles: membership.roles,
         department: membership.department,
       };
     });
@@ -159,10 +185,19 @@ export async function userRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Not a member of this company" } });
       }
 
+      const incomingRoles = body.roles
+        ? dedupeRoles(body.roles)
+        : (body.role !== undefined ? dedupeRoles([body.role]) : undefined);
+      if (incomingRoles && incomingRoles.length === 0) {
+        return reply.status(400).send({
+          error: { code: "VALIDATION", message: "At least one role is required" },
+        });
+      }
+
       const updatedMembership = await tx.userTenantMembership.update({
         where: { userId_tenantId: { userId: id, tenantId } },
         data: {
-          role:       body.role       ?? undefined,
+          roles:      incomingRoles ?? undefined,
           department: body.department === undefined ? undefined : body.department,
           isActive:   body.isActive   ?? undefined,
         },
@@ -179,7 +214,8 @@ export async function userRoutes(app: FastifyInstance) {
 
       return {
         ...updatedUser,
-        role: updatedMembership.role,
+        role: updatedMembership.roles[0] ?? "",
+        roles: updatedMembership.roles,
         department: updatedMembership.department,
         membershipActive: updatedMembership.isActive,
       };

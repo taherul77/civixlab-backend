@@ -4,39 +4,56 @@ import { z } from "zod";
 import { prisma } from "@/db/prisma";
 import { rolePermissions, BUILT_IN_ROLE_TEMPLATES, TENANT_ADMIN_ROLE } from "@/lib/rbac";
 
-// Resolve a role's effective permissions for a given tenant. Reads the
-// tenant's editable copy from `tenant_roles`; on a cold tenant (no rows
-// yet) we seed all built-in templates from rbac defaults so subsequent
-// reads are consistent. Tenant Admin always gets every permission.
-async function resolveTenantPermissions(tenantId: string, role: string): Promise<string[]> {
-  if (role === TENANT_ADMIN_ROLE) {
-    // Always full perms regardless of any stored row.
-    return rolePermissions(role) as string[];
+// Resolve effective permissions for a list of role names within one tenant.
+// Reads the tenant's editable copies from `roles`; cold tenants get their
+// built-in templates seeded so subsequent reads are stable. Tenant Admin
+// always grants every permission. The result is the *union* across every
+// assigned role, with duplicates removed and original order preserved.
+async function resolveTenantPermissions(tenantId: string, roles: readonly string[]): Promise<string[]> {
+  if (!roles || roles.length === 0) return [];
+  if (roles.includes(TENANT_ADMIN_ROLE)) {
+    // Tenant Admin shortcut — always full perms regardless of any stored row.
+    return rolePermissions(TENANT_ADMIN_ROLE) as string[];
   }
   try {
-    let row = await prisma.role.findFirst({ where: { tenantId, name: role } });
-    if (!row) {
-      // Cold tenant — seed the Super Admin template (the only one we seed
-      // by default; every other role is created on demand by the tenant).
-      const have = new Set(
-        (await prisma.role.findMany({ where: { tenantId }, select: { name: true } })).map((r) => r.name),
-      );
-      const toCreate = BUILT_IN_ROLE_TEMPLATES
-        .filter((n) => !have.has(n))
-        .map((name) => ({
-          tenantId,
-          name,
-          permissions: rolePermissions(name) as string[],
-          isCustom: false,
-        }));
-      if (toCreate.length > 0) {
-        await prisma.role.createMany({ data: toCreate, skipDuplicates: true });
-      }
-      row = await prisma.role.findFirst({ where: { tenantId, name: role } });
+    // Make sure the built-in templates exist for this tenant; create only
+    // the missing ones so we never overwrite a tenant's customisation.
+    const haveRows = await prisma.role.findMany({ where: { tenantId }, select: { name: true } });
+    const have = new Set(haveRows.map((r) => r.name));
+    const toCreate = BUILT_IN_ROLE_TEMPLATES
+      .filter((n) => !have.has(n))
+      .map((name) => ({
+        tenantId,
+        name,
+        permissions: rolePermissions(name) as string[],
+        isCustom: false,
+      }));
+    if (toCreate.length > 0) {
+      await prisma.role.createMany({ data: toCreate, skipDuplicates: true });
     }
-    return row?.permissions ?? (rolePermissions(role) as string[]);
+    const rows = await prisma.role.findMany({
+      where: { tenantId, name: { in: [...roles] } },
+    });
+    const byName = new Map(rows.map((r) => [r.name, r.permissions]));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of roles) {
+      const perms = byName.get(r) ?? (rolePermissions(r) as string[]);
+      for (const p of perms) {
+        if (!seen.has(p)) { seen.add(p); out.push(p); }
+      }
+    }
+    return out;
   } catch {
-    return rolePermissions(role) as string[];
+    // Fallback to built-in defaults if the DB read explodes (cold start, etc).
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of roles) {
+      for (const p of (rolePermissions(r) as string[])) {
+        if (!seen.has(p)) { seen.add(p); out.push(p); }
+      }
+    }
+    return out;
   }
 }
 
@@ -103,7 +120,7 @@ export async function authRoutes(app: FastifyInstance) {
       tenantName: m.tenant.name,
       subdomain: m.tenant.subdomain,
       logoUrl: m.tenant.logoUrl,
-      role: m.role,
+      roles: m.roles,
       department: m.department,
     }));
 
@@ -154,15 +171,16 @@ export async function authRoutes(app: FastifyInstance) {
       if (!tenant) {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
       }
-      const role = "Super Admin";
-      const permissions = rolePermissions(role);
+      const roles = ["Super Admin"];
+      const permissions = rolePermissions(roles[0]);
       // Carry scope:"super" forward so this super admin can call /select-tenant
       // again later to switch into a different company.
       const token = await reply.jwtSign({
         sub: decoded.sub,
         tenant_id: tenant.id,
         email: decoded.email,
-        role,
+        role: roles[0],
+        roles,
         permissions,
         mfa_verified: true,
         is_super_admin: true,
@@ -173,7 +191,8 @@ export async function authRoutes(app: FastifyInstance) {
         session: {
           email: decoded.email,
           name: decoded.email,
-          role,
+          role: roles[0],
+          roles,
           tenant: tenant.name,
           permissions,
           mfaRequired: false,
@@ -193,14 +212,18 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: { code: "FORBIDDEN", message: "Not a member of this company" } });
     }
 
-    // Pull the tenant's editable role definition (auto-seeds on a cold
+    // Pull the tenant's editable role definitions (auto-seeds on a cold
     // tenant) so any Tenant Admin customizations actually reach the JWT.
-    const permissions = await resolveTenantPermissions(membership.tenant.id, membership.role);
+    // Permissions are the union across every role on the membership.
+    const roles = membership.roles ?? [];
+    const permissions = await resolveTenantPermissions(membership.tenant.id, roles);
+    const primary = roles[0] ?? "";
     const token = await reply.jwtSign({
       sub: decoded.sub,
       tenant_id: membership.tenant.id,
       email: membership.user.email,
-      role: membership.role,
+      role: primary,
+      roles,
       permissions,
       mfa_verified: !membership.user.mfaEnabled,
     });
@@ -210,7 +233,8 @@ export async function authRoutes(app: FastifyInstance) {
       session: {
         email: membership.user.email,
         name: [membership.user.firstName, membership.user.lastName].filter(Boolean).join(" "),
-        role: membership.role,
+        role: primary,
+        roles,
         tenant: membership.tenant.name,
         permissions,
         mfaRequired: membership.user.mfaEnabled,
