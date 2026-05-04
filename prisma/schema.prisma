@@ -47,6 +47,7 @@ model Tenant {
   rolePagePermissions RolePagePermission[]
   laboratories Laboratory[]
   roles        Role[]
+  departments  Department[]
 
   @@map("tenants")
 }
@@ -74,6 +75,27 @@ model Laboratory {
   @@unique([tenantId, code], name: "uniq_lab_per_tenant_code")
   @@index([tenantId], name: "idx_laboratories_tenant")
   @@map("laboratories")
+}
+
+// Tenant-scoped departments. RLS-isolated by tenant_id so each company only
+// sees its own list. Used as the picker source for User membership.department,
+// Sample / Test department tags, and the Master Setup → Department setup page.
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  code        String?  @db.VarChar(50)
+  description String?
+  manager     String?  @db.VarChar(255)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name], name: "uniq_dept_per_tenant_name")
+  @@index([tenantId], name: "idx_departments_tenant")
+  @@map("departments")
 }
 
 // ---------------------------------------------------------------------------

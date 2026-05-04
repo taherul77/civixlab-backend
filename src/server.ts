@@ -20,6 +20,7 @@ import { rolePermissionsRoutes } from "@/routes/role-permissions";
 import { rolesRoutes } from "@/routes/roles";
 import { superRoutes } from "@/routes/super";
 import { laboratoriesRoutes } from "@/routes/laboratories";
+import { departmentsRoutes } from "@/routes/departments";
 
 async function build() {
   const app = Fastify({
@@ -53,6 +54,7 @@ async function build() {
   await app.register(rolesRoutes);
   await app.register(superRoutes);
   await app.register(laboratoriesRoutes);
+  await app.register(departmentsRoutes);
 
   return app;
 }
