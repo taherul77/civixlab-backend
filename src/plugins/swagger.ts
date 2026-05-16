@@ -29,7 +29,8 @@ function tagFromUrl(url: string): string | null {
   let idx = segments[0] === "v1" ? 1 : 0;
   // Strip a recognised module-group prefix so the tag is the resource, not
   // the module folder (e.g. /v1/operations/projects -> "projects").
-  if (segments[idx] && MODULE_PREFIXES.has(segments[idx])) idx += 1;
+  const maybeModule = segments[idx];
+  if (maybeModule && MODULE_PREFIXES.has(maybeModule)) idx += 1;
   return segments[idx] ?? "default";
 }
 

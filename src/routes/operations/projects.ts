@@ -5,7 +5,7 @@ import { appendAudit } from "@/lib/audit";
 import { userAgentOf, localPart } from "@/lib/req";
 
 const ListQuery = z.object({
-  status: z.enum(["active", "completed", "on_hold", "cancelled", "all"]).optional(),
+  status: z.enum(["active", "inactive", "on_hold", "in_process", "completed", "cancelled", "all"]).optional(),
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -27,7 +27,9 @@ const CreateBody = z.object({
   endDate: z.string().datetime().optional(),
   contractValue: z.number().nonnegative().optional(),
   etimadContractNumber: z.string().max(100).optional(),
-  status: z.enum(["active", "completed", "on_hold", "cancelled"]).default("active"),
+  // The client can only send active/inactive/on_hold via CRUD.
+  // in_process / completed are workflow transitions, not editable fields.
+  status: z.enum(["active", "inactive", "on_hold"]).default("active"),
 });
 
 const UpdateBody = CreateBody.partial();
@@ -52,14 +54,21 @@ export async function projectRoutes(app: FastifyInstance) {
           orderBy: { createdAt: "desc" },
           take: q.limit ?? 100,
           skip: q.offset ?? 0,
-          include: { _count: { select: { samples: true, tests: true } } },
+          include: {
+            _count: { select: { samples: true, tests: true } },
+            sentBy: { select: { email: true, firstName: true, lastName: true } },
+          },
         }),
         tx.project.count({ where }),
       ]);
-      const items = rows.map(({ _count, ...p }) => ({
+      const items = rows.map(({ _count, sentBy, ...p }) => ({
         ...p,
         sampleCount: _count.samples,
         testCount:   _count.tests,
+        sentByEmail: sentBy?.email ?? null,
+        sentByName:  sentBy
+          ? [sentBy.firstName, sentBy.lastName].filter(Boolean).join(" ") || sentBy.email
+          : null,
       }));
       return { items, total };
     });
