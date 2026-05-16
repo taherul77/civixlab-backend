@@ -28,14 +28,14 @@ const ConnectBody = z.object({
 });
 
 export async function equipmentRoutes(app: FastifyInstance) {
-  app.get("/v1/equipment", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/lab/equipment", { onRequest: [app.requireAuth] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const items = await tx.equipment.findMany({ orderBy: { createdAt: "desc" } });
       return { items, total: items.length };
     });
   });
 
-  app.get("/v1/equipment/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/lab/equipment/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.equipment.findUnique({ where: { id } });
@@ -44,7 +44,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/equipment", { onRequest: [app.requirePerm("equipment:create")] }, async (req, reply) => {
+  app.post("/v1/lab/equipment", { onRequest: [app.requirePerm("equipment:create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -76,7 +76,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
   // Connect / disconnect — store the integration endpoint on the row's
   // `apiEndpoint` / `apiKeyEncrypted` columns. (Real key encryption lands in
   // the equipment-adapter slice; for now we store cleartext but never echo it.)
-  app.post("/v1/equipment/:id/connect", { onRequest: [app.requirePerm("equipment:calibrate")] }, async (req, reply) => {
+  app.post("/v1/lab/equipment/:id/connect", { onRequest: [app.requirePerm("equipment:calibrate")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = ConnectBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
@@ -105,7 +105,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/equipment/:id/disconnect", { onRequest: [app.requirePerm("equipment:calibrate")] }, async (req, reply) => {
+  app.post("/v1/lab/equipment/:id/disconnect", { onRequest: [app.requirePerm("equipment:calibrate")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {

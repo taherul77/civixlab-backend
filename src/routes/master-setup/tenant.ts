@@ -56,14 +56,14 @@ function shape(t: {
 
 export async function tenantRoutes(app: FastifyInstance) {
   // Read the current tenant — any signed-in user can see their own company.
-  app.get("/v1/tenant", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/tenant", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenant = await prisma.tenant.findUnique({ where: { id: req.actor!.tenantId } });
     if (!tenant) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tenant not found" } });
     return shape(tenant);
   });
 
   // Update the current tenant — restricted to settings:update (Tenant Admin / Super Admin).
-  app.patch("/v1/tenant", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/tenant", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const body = UpdateBody.parse(req.body);
 
     if (body.subdomain) {
@@ -86,7 +86,7 @@ export async function tenantRoutes(app: FastifyInstance) {
   // Laboratory profile (lives on tenant.settings.laboratory).
   // -------------------------------------------------------------------------
 
-  app.get("/v1/tenant/laboratory", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/tenant/laboratory", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.actor!.tenantId },
       select: { settings: true },
@@ -97,7 +97,7 @@ export async function tenantRoutes(app: FastifyInstance) {
     return laboratory;
   });
 
-  app.put("/v1/tenant/laboratory", { onRequest: [app.requirePerm("settings:update")] }, async (req) => {
+  app.put("/v1/master-setup/tenant/laboratory", { onRequest: [app.requirePerm("settings:update")] }, async (req) => {
     const body = LaboratoryBody.parse(req.body);
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.actor!.tenantId },

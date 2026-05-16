@@ -39,7 +39,7 @@ function requireTenantContext(req: FastifyRequest, reply: FastifyReply): string 
 export async function rolePermissionsRoutes(app: FastifyInstance) {
   // List every (role, pageId) row for the current tenant. Any signed-in
   // member can read this — the sidebar uses it on session start.
-  app.get("/v1/role-permissions", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/admin/role-permissions", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     return withTenant(tenantId, async (tx) => {
@@ -59,7 +59,7 @@ export async function rolePermissionsRoutes(app: FastifyInstance) {
 
   // Replace ALL rows for a single role. Sends a `pages` array; we upsert
   // each row and delete any rows for this role that aren't in the payload.
-  app.put("/v1/role-permissions/:role", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
+  app.put("/v1/admin/role-permissions/:role", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
     const role = (req.params as { role: string }).role;
     if (!role || role.length > 100) {
       return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid role name" } });

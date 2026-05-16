@@ -13,8 +13,8 @@ const ListQuery = z.object({
 
 const CreateBody = z.object({
   /** Optional — the server auto-generates a PRJ-YYYY-NNN code per tenant when
-   *  the client doesn't send one. */
-  projectCode: z.string().min(1).max(100).optional(),
+   *  the client doesn't send one (undefined or empty string both qualify). */
+  projectCode: z.string().max(100).optional(),
   projectName: z.string().min(1).max(255),
   clientName: z.string().max(255).optional(),
   clientEmail: z.string().email().optional(),
@@ -33,7 +33,7 @@ const CreateBody = z.object({
 const UpdateBody = CreateBody.partial();
 
 export async function projectRoutes(app: FastifyInstance) {
-  app.get("/v1/projects", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/operations/projects", { onRequest: [app.requireAuth] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -65,7 +65,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/projects/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/operations/projects/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.project.findUnique({ where: { id } });
@@ -74,7 +74,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/projects", { onRequest: [app.requirePerm("project:create")] }, async (req, reply) => {
+  app.post("/v1/operations/projects", { onRequest: [app.requirePerm("project:create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -128,13 +128,23 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.patch("/v1/projects/:id", { onRequest: [app.requirePerm("project:update")] }, async (req, reply) => {
+  app.patch("/v1/operations/projects/:id", { onRequest: [app.requirePerm("project:update")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const patch = UpdateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
       const before = await tx.project.findFirst({ where: { id, tenantId } });
       if (!before) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Project ${id}` } });
+      // Once sent into the sample workflow, the project is locked from edits.
+      // Only resending or workflow transitions should mutate it.
+      if (before.status === "in_process" || before.status === "completed") {
+        return reply.status(409).send({
+          error: {
+            code: "PROJECT_LOCKED",
+            message: `Project is ${before.status} — edits are disabled once a project has been sent to samples.`,
+          },
+        });
+      }
       const updated = await tx.project.update({
         where: { id },
         data: {
@@ -170,12 +180,20 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/projects/:id", { onRequest: [app.requirePerm("project:delete")] }, async (req, reply) => {
+  app.delete("/v1/operations/projects/:id", { onRequest: [app.requirePerm("project:delete")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
       const found = await tx.project.findFirst({ where: { id, tenantId } });
       if (!found) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Project ${id}` } });
+      if (found.status === "in_process" || found.status === "completed") {
+        return reply.status(409).send({
+          error: {
+            code: "PROJECT_LOCKED",
+            message: `Cannot delete a ${found.status} project — it has been pushed to the sample workflow.`,
+          },
+        });
+      }
 
       // Cascade — the schema has no onDelete on Project→{Sample,Test,WaterTest}
       // and Test→Report, so we have to clear children manually before the
@@ -216,6 +234,66 @@ export async function projectRoutes(app: FastifyInstance) {
         userAgent: userAgentOf(req),
       });
       reply.code(204);
+    });
+  });
+
+  /**
+   * Push a project into the sample workflow. Allowed from `active` and
+   * `on_hold`. Refuses `inactive` (user must reactivate first) and `in_process` /
+   * `completed` (already sent / terminal). Stamps `sentById` + `sentAt` and
+   * flips status to `in_process`.
+   */
+  app.post("/v1/operations/projects/:id/send", { onRequest: [app.requirePerm("project:update")] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { tenantId, sub: userId, email, role } = req.actor!;
+    return withTenant(tenantId, async (tx) => {
+      const found = await tx.project.findFirst({ where: { id, tenantId } });
+      if (!found) {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Project ${id}` } });
+      }
+      if (found.status === "inactive") {
+        return reply.status(409).send({
+          error: {
+            code: "PROJECT_INACTIVE",
+            message: "Project is inactive — update it and set status to Active before sending to samples.",
+          },
+        });
+      }
+      if (found.status === "in_process" || found.status === "completed") {
+        return reply.status(409).send({
+          error: {
+            code: "ALREADY_SENT",
+            message: `Project is already ${found.status}.`,
+          },
+        });
+      }
+
+      const updated = await tx.project.update({
+        where: { id },
+        data: {
+          status: "in_process",
+          sentById: userId,
+          sentAt: new Date(),
+        },
+      });
+
+      await appendAudit(tx, tenantId, {
+        ts: new Date().toISOString(),
+        userEmail: email,
+        userName: localPart(email),
+        userRole: role,
+        action: "send",
+        entity: "project",
+        entityId: id,
+        diff: [
+          { field: "status", from: found.status, to: "in_process" },
+          { field: "sentBy", from: "—",          to: email },
+        ],
+        ip: req.ip,
+        userAgent: userAgentOf(req),
+      });
+
+      return updated;
     });
   });
 }

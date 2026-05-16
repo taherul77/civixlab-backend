@@ -4,24 +4,33 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { env } from "@/config/env";
 
+// Known module prefixes — when the URL is /v1/<module>/<resource>/... the tag
+// should be <resource>, not <module>, so resources stay grouped by entity.
+const MODULE_PREFIXES = new Set(["operations", "lab", "master-setup", "admin"]);
+
 /**
  * Derive a Swagger tag from a route URL so routes group sensibly in the UI
  * without each handler having to set its own `schema.tags`.
  *
- *   /health                  -> "health"
- *   /v1/auth/signin          -> "auth"
- *   /v1/projects/:id         -> "projects"
- *   /v1/super/tenants/:id    -> "super"
- *   /v1/role-permissions     -> "role-permissions"
- *   /docs                    -> skipped (Swagger UI's own routes)
+ *   /health                                -> "health"
+ *   /v1/auth/signin                        -> "auth"
+ *   /v1/operations/projects/:id            -> "projects"
+ *   /v1/master-setup/clients               -> "clients"
+ *   /v1/admin/role-permissions             -> "role-permissions"
+ *   /v1/super/tenants/:id                  -> "super"
+ *   /v1/dashboard/stats                    -> "dashboard"
+ *   /docs                                  -> skipped (Swagger UI's own routes)
  */
 function tagFromUrl(url: string): string | null {
   if (url.startsWith("/docs") || url === "/json") return null;
   const segments = url.split("/").filter(Boolean);
   if (segments.length === 0) return "default";
   // Strip the /v1 version segment if present.
-  const start = segments[0] === "v1" ? 1 : 0;
-  return segments[start] ?? "default";
+  let idx = segments[0] === "v1" ? 1 : 0;
+  // Strip a recognised module-group prefix so the tag is the resource, not
+  // the module folder (e.g. /v1/operations/projects -> "projects").
+  if (segments[idx] && MODULE_PREFIXES.has(segments[idx])) idx += 1;
+  return segments[idx] ?? "default";
 }
 
 /**

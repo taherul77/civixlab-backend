@@ -19,7 +19,8 @@ function requireTenantContext(req: FastifyRequest, reply: FastifyReply): string 
 }
 
 const CreateBody = z.object({
-  code:         z.string().min(1).max(100),
+  /** Optional — the server auto-generates CLI-NNN per tenant when omitted. */
+  code:         z.string().max(100).optional(),
   name:         z.string().min(1).max(255),
   contactName:  z.string().max(255).optional(),
   contactEmail: z.string().email().max(255).optional(),
@@ -64,7 +65,7 @@ function shape(c: {
 }
 
 export async function clientsRoutes(app: FastifyInstance) {
-  app.get("/v1/clients", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/clients", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     return withTenant(tenantId, async (tx) => {
@@ -76,7 +77,7 @@ export async function clientsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/clients/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/clients/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -87,24 +88,40 @@ export async function clientsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/clients", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.post("/v1/master-setup/clients", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     const body = CreateBody.parse(req.body);
     return withTenant(tenantId, async (tx) => {
-      const exists = await tx.client.findFirst({ where: { tenantId, code: body.code } });
+      // Auto-generate CLI-NNN per tenant when the client omits the code.
+      let code = body.code;
+      if (!code) {
+        const prefix = "CLI-";
+        const last = await tx.client.findFirst({
+          where:   { tenantId, code: { startsWith: prefix } },
+          orderBy: { code: "desc" },
+          select:  { code: true },
+        });
+        let next = 1;
+        if (last) {
+          const m = last.code.match(/-(\d+)$/);
+          if (m) next = Number(m[1]) + 1;
+        }
+        code = `${prefix}${String(next).padStart(3, "0")}`;
+      }
+      const exists = await tx.client.findFirst({ where: { tenantId, code } });
       if (exists) {
         return reply.status(409).send({
-          error: { code: "CONFLICT", message: `Client code "${body.code}" already exists` },
+          error: { code: "CONFLICT", message: `Client code "${code}" already exists` },
         });
       }
-      const created = await tx.client.create({ data: { ...body, tenantId } });
+      const created = await tx.client.create({ data: { ...body, code, tenantId } });
       reply.code(201);
       return shape(created);
     });
   });
 
-  app.patch("/v1/clients/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/clients/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -125,7 +142,7 @@ export async function clientsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/clients/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.delete("/v1/master-setup/clients/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;

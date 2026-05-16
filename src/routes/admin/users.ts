@@ -62,7 +62,7 @@ const SAFE_USER_SELECT = {
 
 export async function userRoutes(app: FastifyInstance) {
   // List all users belonging to the current tenant (via memberships).
-  app.get("/v1/users", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/admin/users", { onRequest: [app.requireAuth] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const memberships = await tx.userTenantMembership.findMany({
         where: { tenantId: req.actor!.tenantId },
@@ -80,7 +80,7 @@ export async function userRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/users/invite", { onRequest: [app.requirePerm("user:invite")] }, async (req, reply) => {
+  app.post("/v1/admin/users/invite", { onRequest: [app.requirePerm("user:invite")] }, async (req, reply) => {
     const body = InviteBody.parse(req.body);
     const { tenantId, email: actorEmail, role: actorRole } = req.actor!;
 
@@ -161,7 +161,7 @@ export async function userRoutes(app: FastifyInstance) {
   // current tenant. Optional firstName / lastName / phone fields update the
   // global user record so a Tenant Admin can fix typos without removing the
   // membership.
-  app.patch("/v1/users/:id/membership", { onRequest: [app.requirePerm("user:update")] }, async (req, reply) => {
+  app.patch("/v1/admin/users/:id/membership", { onRequest: [app.requirePerm("user:update")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) {
       return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid user id" } });
@@ -224,7 +224,7 @@ export async function userRoutes(app: FastifyInstance) {
 
   // Remove a user's membership from the current tenant. The user's global
   // account is preserved (they may belong to other tenants).
-  app.delete("/v1/users/:id/membership", { onRequest: [app.requirePerm("user:delete")] }, async (req, reply) => {
+  app.delete("/v1/admin/users/:id/membership", { onRequest: [app.requirePerm("user:delete")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) {
       return reply.status(400).send({ error: { code: "VALIDATION", message: "Invalid user id" } });

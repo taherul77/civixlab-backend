@@ -87,7 +87,7 @@ async function generateUniqueCode(
 }
 
 export async function departmentsRoutes(app: FastifyInstance) {
-  app.get("/v1/departments", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/departments", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     return withTenant(tenantId, async (tx) => {
@@ -100,7 +100,7 @@ export async function departmentsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/departments/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/departments/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -114,7 +114,7 @@ export async function departmentsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/departments", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.post("/v1/master-setup/departments", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     const body = CreateBody.parse(req.body);
@@ -143,7 +143,7 @@ export async function departmentsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.put("/v1/departments/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.put("/v1/master-setup/departments/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -168,7 +168,7 @@ export async function departmentsRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/departments/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.delete("/v1/master-setup/departments/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;

@@ -69,7 +69,7 @@ function conflict(message: string) {
 // ---------------------------------------------------------------------------
 
 export async function testRoutes(app: FastifyInstance) {
-  app.get("/v1/tests", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/operations/tests", { onRequest: [app.requireAuth] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -97,7 +97,7 @@ export async function testRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/tests/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/operations/tests/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.test.findUnique({ where: { id } });
@@ -107,7 +107,7 @@ export async function testRoutes(app: FastifyInstance) {
   });
 
   // ------------------------------------------------------------------ create
-  app.post("/v1/tests", { onRequest: [app.requirePerm("test:create")] }, async (req, reply) => {
+  app.post("/v1/operations/tests", { onRequest: [app.requirePerm("test:create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -161,7 +161,7 @@ export async function testRoutes(app: FastifyInstance) {
   });
 
   // ------------------------------------------------------------------ update
-  app.patch("/v1/tests/:id", { onRequest: [app.requirePerm("test:update")] }, async (req, reply) => {
+  app.patch("/v1/operations/tests/:id", { onRequest: [app.requirePerm("test:update")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const patch = UpdateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
@@ -204,7 +204,7 @@ export async function testRoutes(app: FastifyInstance) {
       transition === "approve" ? "test:approve" :
                                  "test:review";
     const move: Transition = TRANSITIONS[transition];
-    app.post(`/v1/tests/:id/${transition}`, { onRequest: [app.requirePerm(perm)] }, async (req, reply) => {
+    app.post(`/v1/operations/tests/:id/${transition}`, { onRequest: [app.requirePerm(perm)] }, async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = WorkflowBody.parse(req.body ?? {});
       const { tenantId, sub: userId, email, role } = req.actor!;
@@ -245,7 +245,7 @@ export async function testRoutes(app: FastifyInstance) {
   }
 
   // -------------------------------------------------------------------- sign
-  app.post("/v1/tests/:id/sign", { onRequest: [app.requirePerm("test:sign")] }, async (req, reply) => {
+  app.post("/v1/operations/tests/:id/sign", { onRequest: [app.requirePerm("test:sign")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = SignBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;

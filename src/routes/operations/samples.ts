@@ -32,7 +32,7 @@ const CreateBody = z.object({
 });
 
 export async function sampleRoutes(app: FastifyInstance) {
-  app.get("/v1/samples", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/operations/samples", { onRequest: [app.requireAuth] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -58,7 +58,7 @@ export async function sampleRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/samples/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/operations/samples/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.sample.findUnique({ where: { id } });
@@ -67,7 +67,7 @@ export async function sampleRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/samples", { onRequest: [app.requirePerm("sample:create")] }, async (req, reply) => {
+  app.post("/v1/operations/samples", { onRequest: [app.requirePerm("sample:create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {

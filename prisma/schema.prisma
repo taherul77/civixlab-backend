@@ -184,6 +184,7 @@ model User {
 
   memberships      UserTenantMembership[]
   projects         Project[]   @relation("ProjectCreatedBy")
+  projectsSent     Project[]   @relation("ProjectSentBy")
   samples          Sample[]    @relation("SampleCreatedBy")
   testsTested      Test[]      @relation("TestTestedBy")
   testsReviewed    Test[]      @relation("TestReviewedBy")
@@ -284,12 +285,21 @@ model Project {
   endDate                DateTime? @map("end_date") @db.Date
   contractValue          Decimal? @map("contract_value") @db.Decimal(15, 2)
   etimadContractNumber   String?  @map("etimad_contract_number") @db.VarChar(100)
+  // Status workflow:
+  //   active     — newly created/edited, eligible to send to samples
+  //   inactive   — disabled, cannot be sent
+  //   on_hold    — paused (only set via Edit)
+  //   in_process — has been sent to samples (set by /send endpoint)
+  //   completed  — workflow-complete (terminal)
   status                 String   @default("active") @db.VarChar(50)
+  sentById               String?  @map("sent_by_id") @db.Uuid
+  sentAt                 DateTime? @map("sent_at") @db.Timestamptz
   createdById            String?  @map("created_by") @db.Uuid
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy  User?    @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  sentBy     User?    @relation("ProjectSentBy", fields: [sentById], references: [id])
   samples    Sample[]
   tests      Test[]
   waterTests WaterTest[]

@@ -19,7 +19,8 @@ function requireTenantContext(req: FastifyRequest, reply: FastifyReply): string 
 }
 
 const CreateBody = z.object({
-  code:          z.string().min(1).max(100),
+  /** Optional — the server auto-generates ENG-NNN per tenant when omitted. */
+  code:          z.string().max(100).optional(),
   name:          z.string().min(1).max(255),
   email:         z.string().email().max(255).optional(),
   phone:         z.string().max(50).optional(),
@@ -55,7 +56,7 @@ function shape(e: {
 }
 
 export async function engineersRoutes(app: FastifyInstance) {
-  app.get("/v1/engineers", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/engineers", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     return withTenant(tenantId, async (tx) => {
@@ -67,7 +68,7 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/engineers/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/master-setup/engineers/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -78,24 +79,40 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/engineers", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.post("/v1/master-setup/engineers", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     const body = CreateBody.parse(req.body);
     return withTenant(tenantId, async (tx) => {
-      const exists = await tx.engineer.findFirst({ where: { tenantId, code: body.code } });
+      // Auto-generate ENG-NNN per tenant when the client omits the code.
+      let code = body.code;
+      if (!code) {
+        const prefix = "ENG-";
+        const last = await tx.engineer.findFirst({
+          where:   { tenantId, code: { startsWith: prefix } },
+          orderBy: { code: "desc" },
+          select:  { code: true },
+        });
+        let next = 1;
+        if (last) {
+          const m = last.code.match(/-(\d+)$/);
+          if (m) next = Number(m[1]) + 1;
+        }
+        code = `${prefix}${String(next).padStart(3, "0")}`;
+      }
+      const exists = await tx.engineer.findFirst({ where: { tenantId, code } });
       if (exists) {
         return reply.status(409).send({
-          error: { code: "CONFLICT", message: `Engineer code "${body.code}" already exists` },
+          error: { code: "CONFLICT", message: `Engineer code "${code}" already exists` },
         });
       }
-      const created = await tx.engineer.create({ data: { ...body, tenantId } });
+      const created = await tx.engineer.create({ data: { ...body, code, tenantId } });
       reply.code(201);
       return shape(created);
     });
   });
 
-  app.patch("/v1/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -116,7 +133,7 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.delete("/v1/master-setup/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;

@@ -11,7 +11,7 @@ const ListQuery = z.object({
 });
 
 export async function auditRoutes(app: FastifyInstance) {
-  app.get("/v1/audit", { onRequest: [app.requirePerm("audit:read")] }, async (req) => {
+  app.get("/v1/lab/audit", { onRequest: [app.requirePerm("audit:read")] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -47,7 +47,7 @@ export async function auditRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/audit/verify", { onRequest: [app.requirePerm("audit:read")] }, async (req) => {
+  app.get("/v1/lab/audit/verify", { onRequest: [app.requirePerm("audit:read")] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const items = await tx.auditLog.findMany({ orderBy: { createdAt: "desc" } });
       const chain: ChainEntry[] = items.map((a) => ({

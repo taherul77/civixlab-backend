@@ -59,7 +59,7 @@ export async function rolesRoutes(app: FastifyInstance) {
   // List the tenant's roles. Super Admin may pass ?tenantId=... to inspect
   // any company. On first read for a cold tenant, we seed the Super Admin
   // template so subsequent calls are stable.
-  app.get("/v1/roles", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/admin/roles", { onRequest: [app.requireAuth] }, async (req, reply) => {
     const q = TenantIdQuery.parse(req.query);
     const tenantId = resolveTargetTenant(req, reply, q.tenantId);
     if (!tenantId) return;
@@ -103,7 +103,7 @@ export async function rolesRoutes(app: FastifyInstance) {
   });
 
   // Create a custom role for the resolved tenant.
-  app.post("/v1/roles", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
+  app.post("/v1/admin/roles", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const tenantId = resolveTargetTenant(req, reply, body.tenantId);
     if (!tenantId) return;
@@ -137,7 +137,7 @@ export async function rolesRoutes(app: FastifyInstance) {
   });
 
   // Update a role by id. Renames and permission updates both go through here.
-  app.put("/v1/roles/:id", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
+  app.put("/v1/admin/roles/:id", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
     const { id } = RoleIdParam.parse(req.params);
     const body = UpdateBody.parse(req.body);
     return withTenant(req.actor?.isSuperAdmin ? "" : (req.actor?.tenantId ?? ""), async () => {
@@ -175,7 +175,7 @@ export async function rolesRoutes(app: FastifyInstance) {
   });
 
   // Delete a role by id. Tenant Admin and Super Admin are platform-protected.
-  app.delete("/v1/roles/:id", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
+  app.delete("/v1/admin/roles/:id", { onRequest: [app.requirePerm("security:update")] }, async (req, reply) => {
     const { id } = RoleIdParam.parse(req.params);
     const row = await prisma.role.findUnique({ where: { id } });
     if (!row) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Role not found" } });

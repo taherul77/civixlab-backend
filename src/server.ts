@@ -6,24 +6,31 @@ import { env } from "@/config/env";
 import { authPlugin } from "@/plugins/auth";
 import { errorHandlerPlugin } from "@/plugins/error-handler";
 import { swaggerPlugin } from "@/plugins/swagger";
+// Routes are organised by sidebar module — each subfolder maps 1:1 to a
+// /v1/<module>/<resource> URL prefix. Cross-cutting routes (auth, health,
+// dashboard, reports, super) keep their own top-level paths.
 import { healthRoutes } from "@/routes/health";
 import { authRoutes } from "@/routes/auth";
-import { projectRoutes } from "@/routes/projects";
-import { sampleRoutes } from "@/routes/samples";
-import { testRoutes } from "@/routes/tests";
-import { equipmentRoutes } from "@/routes/equipment";
-import { userRoutes } from "@/routes/users";
-import { auditRoutes } from "@/routes/audit";
 import { dashboardRoutes } from "@/routes/dashboard";
 import { reportRoutes } from "@/routes/reports";
-import { tenantRoutes } from "@/routes/tenant";
-import { rolePermissionsRoutes } from "@/routes/role-permissions";
-import { rolesRoutes } from "@/routes/roles";
 import { superRoutes } from "@/routes/super";
-import { laboratoriesRoutes } from "@/routes/laboratories";
-import { departmentsRoutes } from "@/routes/departments";
-import { clientsRoutes } from "@/routes/clients";
-import { engineersRoutes } from "@/routes/engineers";
+// Operations module
+import { projectRoutes } from "@/routes/operations/projects";
+import { sampleRoutes } from "@/routes/operations/samples";
+import { testRoutes } from "@/routes/operations/tests";
+// Lab module
+import { equipmentRoutes } from "@/routes/lab/equipment";
+import { auditRoutes } from "@/routes/lab/audit";
+// Master setup module
+import { tenantRoutes } from "@/routes/master-setup/tenant";
+import { laboratoriesRoutes } from "@/routes/master-setup/laboratories";
+import { departmentsRoutes } from "@/routes/master-setup/departments";
+import { clientsRoutes } from "@/routes/master-setup/clients";
+import { engineersRoutes } from "@/routes/master-setup/engineers";
+// Admin module
+import { userRoutes } from "@/routes/admin/users";
+import { rolesRoutes } from "@/routes/admin/roles";
+import { rolePermissionsRoutes } from "@/routes/admin/role-permissions";
 
 async function build() {
   const app = Fastify({
