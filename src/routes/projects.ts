@@ -44,15 +44,21 @@ export async function projectRoutes(app: FastifyInstance) {
           { city:        { contains: q.q, mode: "insensitive" } },
         ];
       }
-      const [items, total] = await Promise.all([
+      const [rows, total] = await Promise.all([
         tx.project.findMany({
           where,
           orderBy: { createdAt: "desc" },
           take: q.limit ?? 100,
           skip: q.offset ?? 0,
+          include: { _count: { select: { samples: true, tests: true } } },
         }),
         tx.project.count({ where }),
       ]);
+      const items = rows.map(({ _count, ...p }) => ({
+        ...p,
+        sampleCount: _count.samples,
+        testCount:   _count.tests,
+      }));
       return { items, total };
     });
   });
@@ -102,7 +108,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const patch = UpdateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
-      const before = await tx.project.findUnique({ where: { id } });
+      const before = await tx.project.findFirst({ where: { id, tenantId } });
       if (!before) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Project ${id}` } });
       const updated = await tx.project.update({
         where: { id },
@@ -112,24 +118,79 @@ export async function projectRoutes(app: FastifyInstance) {
           endDate:   patch.endDate   ? new Date(patch.endDate)   : undefined,
         },
       });
-      const diff = Object.keys(patch).map((k) => ({
-        field: k,
-        from: String((before as Record<string, unknown>)[k] ?? "—"),
-        to:   String((updated as Record<string, unknown>)[k] ?? "—"),
-      }));
+      const before_ = before as Record<string, unknown>;
+      const after_  = updated as Record<string, unknown>;
+      const diff = Object.keys(patch)
+        .map((k) => ({
+          field: k,
+          from: String(before_[k] ?? "—"),
+          to:   String(after_[k]  ?? "—"),
+        }))
+        .filter((d) => d.from !== d.to);
+      if (diff.length > 0) {
+        await appendAudit(tx, tenantId, {
+          ts: new Date().toISOString(),
+          userEmail: email,
+          userName: localPart(email),
+          userRole: role,
+          action: "update",
+          entity: "project",
+          entityId: id,
+          diff,
+          ip: req.ip,
+          userAgent: userAgentOf(req),
+        });
+      }
+      return updated;
+    });
+  });
+
+  app.delete("/v1/projects/:id", { onRequest: [app.requirePerm("project:delete")] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { tenantId, email, role } = req.actor!;
+    return withTenant(tenantId, async (tx) => {
+      const found = await tx.project.findFirst({ where: { id, tenantId } });
+      if (!found) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Project ${id}` } });
+
+      // Cascade — the schema has no onDelete on Project→{Sample,Test,WaterTest}
+      // and Test→Report, so we have to clear children manually before the
+      // project row can go. All inside the same tenant-scoped transaction.
+      const sampleIds = (await tx.sample.findMany({
+        where: { projectId: id }, select: { id: true },
+      })).map((s) => s.id);
+      const testIds = (await tx.test.findMany({
+        where: { projectId: id }, select: { id: true },
+      })).map((t) => t.id);
+
+      if (testIds.length > 0) {
+        await tx.report.deleteMany({ where: { testId: { in: testIds } } });
+      }
+      await tx.waterTest.deleteMany({ where: { projectId: id } });
+      if (testIds.length > 0) {
+        await tx.test.deleteMany({ where: { id: { in: testIds } } });
+      }
+      if (sampleIds.length > 0) {
+        await tx.sample.deleteMany({ where: { id: { in: sampleIds } } });
+      }
+      await tx.project.delete({ where: { id } });
+
       await appendAudit(tx, tenantId, {
         ts: new Date().toISOString(),
         userEmail: email,
         userName: localPart(email),
         userRole: role,
-        action: "update",
+        action: "delete",
         entity: "project",
         entityId: id,
-        diff,
+        diff: [
+          { field: "code", from: found.projectCode, to: "—" },
+          { field: "samples_deleted", from: "0", to: String(sampleIds.length) },
+          { field: "tests_deleted",   from: "0", to: String(testIds.length) },
+        ],
         ip: req.ip,
         userAgent: userAgentOf(req),
       });
-      return updated;
+      reply.code(204);
     });
   });
 }

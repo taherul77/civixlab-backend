@@ -48,6 +48,7 @@ model Tenant {
   laboratories Laboratory[]
   roles        Role[]
   departments  Department[]
+  clients      Client[]
 
   @@map("tenants")
 }
@@ -104,6 +105,33 @@ model Department {
   @@unique([tenantId, code], name: "uniq_dept_per_tenant_code")
   @@index([tenantId], name: "idx_departments_tenant")
   @@map("departments")
+}
+
+// Tenant-scoped client directory. Holds the companies your lab tests samples
+// for — projects/invoices/reports link back here. RLS-isolated by tenant_id.
+model Client {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  code         String   @db.VarChar(100)
+  name         String   @db.VarChar(255)
+  contactName  String?  @map("contact_name")  @db.VarChar(255)
+  contactEmail String?  @map("contact_email") @db.VarChar(255)
+  contactPhone String?  @map("contact_phone") @db.VarChar(50)
+  address      String?  @db.VarChar(500)
+  city         String?  @db.VarChar(100)
+  country      String?  @db.VarChar(100)
+  vatNumber    String?  @map("vat_number") @db.VarChar(50)
+  crNumber     String?  @map("cr_number")  @db.VarChar(50)
+  notes        String?
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code], name: "uniq_client_per_tenant_code")
+  @@index([tenantId], name: "idx_clients_tenant")
+  @@map("clients")
 }
 
 // ---------------------------------------------------------------------------
