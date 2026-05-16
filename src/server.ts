@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import { env } from "@/config/env";
 import { authPlugin } from "@/plugins/auth";
 import { errorHandlerPlugin } from "@/plugins/error-handler";
+import { swaggerPlugin } from "@/plugins/swagger";
 import { healthRoutes } from "@/routes/health";
 import { authRoutes } from "@/routes/auth";
 import { projectRoutes } from "@/routes/projects";
@@ -34,10 +35,40 @@ async function build() {
     trustProxy: true,
   });
 
-  await app.register(helmet);
+  await app.register(helmet, {
+    // Swagger UI needs to inline its own scripts/styles and load SVG icons.
+    contentSecurityPolicy: false,
+    // HSTS on localhost dev is harmful — once cached, the browser silently
+    // upgrades http://localhost:4000 to https:// for ~180 days and every
+    // request fails because the server only listens on HTTP. Enable HSTS in
+    // production behind TLS only.
+    hsts: env.NODE_ENV === "production",
+  });
+
+  // Fastify v5 rejects requests that declare Content-Type: application/json
+  // with an empty body (FST_ERR_CTP_EMPTY_JSON_BODY). Swagger UI's "Try it
+  // out" always sends that header, even for DELETE/GET with no body — so we
+  // override the parser to treat empty bodies as undefined.
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      const raw = (body as string | undefined) ?? "";
+      if (raw.trim() === "") return done(null, undefined);
+      try {
+        done(null, JSON.parse(raw));
+      } catch (err) {
+        const e = err as Error & { statusCode?: number };
+        e.statusCode = 400;
+        done(e, undefined);
+      }
+    },
+  );
   await app.register(cors, { origin: true, credentials: true });
   await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
   await app.register(errorHandlerPlugin);
+  await app.register(swaggerPlugin);
   await app.register(authPlugin);
 
   await app.register(healthRoutes);
@@ -68,6 +99,8 @@ async function main() {
     app.log.info(
       `CiviXLab API listening on http://${env.HOST}:${env.PORT} (${env.NODE_ENV})`
     );
+    app.log.info(`Swagger UI:  http://${env.HOST}:${env.PORT}/docs`);
+    app.log.info(`OpenAPI JSON: http://${env.HOST}:${env.PORT}/docs/json`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

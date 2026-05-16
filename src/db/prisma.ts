@@ -1,4 +1,12 @@
 import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { env } from "@/config/env";
+
+// Prisma 7 no longer reads `url` from schema.prisma. The runtime client now
+// constructs its own pg connection pool via @prisma/adapter-pg and hands it
+// to PrismaClient. Migrations are still driven by Prisma CLI but configured
+// via `prisma.config.ts` at the repo root.
+const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
 
 declare global {
   // eslint-disable-next-line no-var
@@ -6,6 +14,7 @@ declare global {
 }
 
 export const prisma = global.__prisma ?? new PrismaClient({
+  adapter,
   log: ["warn", "error"],
 });
 
