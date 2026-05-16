@@ -23,6 +23,7 @@ import { superRoutes } from "@/routes/super";
 import { laboratoriesRoutes } from "@/routes/laboratories";
 import { departmentsRoutes } from "@/routes/departments";
 import { clientsRoutes } from "@/routes/clients";
+import { engineersRoutes } from "@/routes/engineers";
 
 async function build() {
   const app = Fastify({
@@ -88,6 +89,7 @@ async function build() {
   await app.register(laboratoriesRoutes);
   await app.register(departmentsRoutes);
   await app.register(clientsRoutes);
+  await app.register(engineersRoutes);
 
   return app;
 }

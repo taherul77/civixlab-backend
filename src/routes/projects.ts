@@ -12,7 +12,9 @@ const ListQuery = z.object({
 });
 
 const CreateBody = z.object({
-  projectCode: z.string().min(1).max(100),
+  /** Optional — the server auto-generates a PRJ-YYYY-NNN code per tenant when
+   *  the client doesn't send one. */
+  projectCode: z.string().min(1).max(100).optional(),
   projectName: z.string().min(1).max(255),
   clientName: z.string().max(255).optional(),
   clientEmail: z.string().email().optional(),
@@ -76,11 +78,34 @@ export async function projectRoutes(app: FastifyInstance) {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
+      // Auto-generate a PRJ-YYYY-NNN code per tenant when the client doesn't
+      // provide one. Find the highest existing suffix and increment. Padded
+      // to 3 digits so lexicographic ordering matches numeric ordering up to
+      // 999. Race conditions are caught by the (tenantId, projectCode) unique
+      // index — a P2002 would surface as a 409 to the client.
+      let projectCode = body.projectCode;
+      if (!projectCode) {
+        const year = new Date().getFullYear();
+        const prefix = `PRJ-${year}-`;
+        const last = await tx.project.findFirst({
+          where:   { tenantId, projectCode: { startsWith: prefix } },
+          orderBy: { projectCode: "desc" },
+          select:  { projectCode: true },
+        });
+        let next = 1;
+        if (last) {
+          const m = last.projectCode.match(/-(\d+)$/);
+          if (m) next = Number(m[1]) + 1;
+        }
+        projectCode = `${prefix}${String(next).padStart(3, "0")}`;
+      }
+
       const created = await tx.project.create({
         data: {
           tenantId,
           createdById: userId,
           ...body,
+          projectCode,
           startDate: body.startDate ? new Date(body.startDate) : null,
           endDate:   body.endDate   ? new Date(body.endDate)   : null,
           contractValue: body.contractValue ?? null,

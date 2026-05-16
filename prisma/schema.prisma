@@ -50,6 +50,7 @@ model Tenant {
   roles        Role[]
   departments  Department[]
   clients      Client[]
+  engineers    Engineer[]
 
   @@map("tenants")
 }
@@ -133,6 +134,30 @@ model Client {
   @@unique([tenantId, code], name: "uniq_client_per_tenant_code")
   @@index([tenantId], name: "idx_clients_tenant")
   @@map("clients")
+}
+
+// Tenant-scoped engineer roster. Projects link to engineers by name (via the
+// existing engineerName string column) so this is a master-data catalogue
+// for the picker; turning it into a true FK relation is a future migration.
+model Engineer {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  code          String   @db.VarChar(100)
+  name          String   @db.VarChar(255)
+  email         String?  @db.VarChar(255)
+  phone         String?  @db.VarChar(50)
+  licenseNumber String?  @map("license_number") @db.VarChar(100)
+  specialty     String?  @db.VarChar(100)
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code], name: "uniq_engineer_per_tenant_code")
+  @@index([tenantId], name: "idx_engineers_tenant")
+  @@map("engineers")
 }
 
 // ---------------------------------------------------------------------------
