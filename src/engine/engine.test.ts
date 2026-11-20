@@ -38,3 +38,34 @@ test("A9: SO3 by cement max 4%", () => {
 test("invalid input is rejected with field issues", () => {
   assert.throws(() => evaluate("CONC-A2", { finalHeightMm: 400, concreteTemperatureC: 30 }), EngineValidationError);
 });
+
+test("every registered template evaluates with sample input", async () => {
+  const { listTemplates } = await import("./index");
+  const all = listTemplates();
+  assert.ok(all.length >= 75, `expected >= 75 templates, got ${all.length}`);
+  for (const t of all) {
+    const input: Record<string, unknown> = {};
+    for (const f of t.fields) {
+      if (f.default !== undefined) continue;
+      if (!f.required) continue;
+      if (f.type === "number" || f.type === "integer") input[f.name] = Math.max(f.min ?? 0, 10);
+      else if (f.type === "date") input[f.name] = "2026-01-01";
+      else if (f.type === "enum") input[f.name] = f.options![0];
+      else input[f.name] = "x";
+    }
+    const r = evaluate(t.code, input);
+    assert.ok(r.overall, `${t.code} produced no verdict`);
+  }
+});
+
+test("H1: SASO 1494 potable water limits", () => {
+  const ok = {
+    samplingPoint: "tap-1", ph: 7.2, turbidityNtu: 1, colorTcu: 5, tdsMgL: 300, chlorideMgL: 100, sulfateMgL: 100,
+    nitrateMgL: 10, nitriteMgL: 0.1, fluorideMgL: 0.5, ironMgL: 0.05, manganeseMgL: 0.05, leadMgL: 0.001,
+    arsenicMgL: 0.001, cadmiumMgL: 0.001, residualChlorineMgL: 0.3, totalColiformMpn: 0, eColiMpn: 0,
+  };
+  assert.equal(evaluate("H1", ok).results.suitableForDrinking, true);
+  const bad = evaluate("H1", { ...ok, eColiMpn: 2 });
+  assert.equal(bad.overall, "fail");
+  assert.ok(bad.warnings.some((w) => w.includes("Bacterial")));
+});

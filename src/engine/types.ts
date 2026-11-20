@@ -36,6 +36,8 @@ export type Overall = "pass" | "fail" | "warning" | "pending";
 export interface EvaluationResult {
   testCode: string;
   results: Record<string, number | string | boolean>;
+  /** Ordered, labelled rows for display (optional; legacy schemas provide them). */
+  rows?: { key: string; label: string; unit?: string; value: number | string }[];
   checks: Check[];
   warnings: string[];
   overall: Overall;
