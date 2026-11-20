@@ -10,6 +10,8 @@ const Schema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 chars"),
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   DB_APP_ROLE: z.string().default("civixlab_app"),
+  /** Where the web app serves /verify/<report number>; encoded in each report's QR code. */
+  PUBLIC_VERIFY_BASE_URL: z.string().url().default("http://localhost:3000/verify"),
 });
 
 export const env = Schema.parse(process.env);

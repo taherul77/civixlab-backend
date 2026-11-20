@@ -540,5 +540,6 @@ model Report {
   test        Test?  @relation(fields: [testId], references: [id])
   generatedBy User?  @relation("ReportGeneratedBy", fields: [generatedById], references: [id])
 
+  @@unique([reportNumber], map: "uniq_report_number")
   @@map("reports")
 }
