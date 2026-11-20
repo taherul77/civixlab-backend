@@ -3,13 +3,14 @@ import { z } from "zod";
 import { withTenant } from "@/db/prisma";
 import { appendAudit } from "@/lib/audit";
 import { calibrationBlockReason } from "@/lib/calibration";
+import { ACTION_PERMISSION, COMMENT_PERMISSIONS, REASON_REQUIRED, TRANSITIONS, canMove, isEditable, type WorkflowAction } from "@/lib/test-workflow";
 import { userAgentOf, localPart } from "@/lib/req";
 
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
 
-const TestStatus = z.enum(["draft", "submitted", "reviewed", "approved", "rejected", "signed"]);
+const TestStatus = z.enum(["draft", "submitted", "reviewed", "approved", "returned", "rejected", "signed"]);
 
 const ListQuery = z.object({
   status: z.string().optional(),
@@ -49,15 +50,6 @@ const SignBody = z.object({ certificateSerial: z.string().min(1) });
 // ---------------------------------------------------------------------------
 // Workflow guards (keep in sync with frontend's `submitTestForReview` etc.)
 // ---------------------------------------------------------------------------
-
-type Transition = { from: string[]; to: string };
-const TRANSITIONS = {
-  submit:  { from: ["draft"],                  to: "submitted" },
-  review:  { from: ["submitted"],              to: "reviewed"  },
-  approve: { from: ["submitted", "reviewed"],  to: "approved"  },
-  reject:  { from: ["submitted", "reviewed"],  to: "rejected"  },
-  sign:    { from: ["approved"],               to: "signed"    },
-} satisfies Record<string, Transition>;
 
 function conflict(message: string) {
   const err: Error & { statusCode?: number } = new Error(message);
@@ -169,7 +161,7 @@ export async function testRoutes(app: FastifyInstance) {
     return withTenant(tenantId, async (tx) => {
       const before = await tx.test.findUnique({ where: { id } });
       if (!before) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Test ${id}` } });
-      if (before.status !== "draft" && before.status !== "rejected") {
+      if (!isEditable(before.status)) {
         throw conflict(`Test ${id} cannot be edited in status "${before.status}"`);
       }
       const updated = await tx.test.update({
@@ -199,28 +191,32 @@ export async function testRoutes(app: FastifyInstance) {
   });
 
   // ---------------------------------------------------------------- workflow
-  for (const transition of ["submit", "review", "approve", "reject"] as const) {
-    const perm =
-      transition === "submit"  ? "test:submit"  :
-      transition === "approve" ? "test:approve" :
-                                 "test:review";
-    const move: Transition = TRANSITIONS[transition];
-    app.post(`/v1/operations/tests/:id/${transition}`, { onRequest: [app.requirePerm(perm)] }, async (req, reply) => {
+  // "reject" is the legacy route name of "return" (kept for older clients).
+  const ROUTES: [string, WorkflowAction][] = [
+    ["submit", "submit"], ["review", "review"], ["approve", "approve"], ["return", "return"], ["reject", "return"],
+  ];
+  for (const [path, action] of ROUTES) {
+    const move = TRANSITIONS[action];
+    app.post(`/v1/operations/tests/:id/${path}`, { onRequest: [app.requirePerm(ACTION_PERMISSION[action])] }, async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = WorkflowBody.parse(req.body ?? {});
+      const comment = body.comment?.trim() ?? "";
+      if (REASON_REQUIRED.has(action) && comment.length < 3) {
+        return reply.status(400).send({ error: { code: "REASON_REQUIRED", message: "Say what needs to be corrected (at least a few words)." } });
+      }
       const { tenantId, sub: userId, email, role } = req.actor!;
       return withTenant(tenantId, async (tx) => {
         const t = await tx.test.findUnique({ where: { id } });
         if (!t) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Test ${id}` } });
-        if (!move.from.includes(t.status)) {
-          throw conflict(`Test ${id} cannot ${transition} from status "${t.status}"`);
+        if (!canMove(action, t.status)) {
+          throw conflict(`Test ${id} cannot ${action} from status "${t.status}"`);
         }
         const now = new Date();
 
         // Approval gate (spec section 8): the linked instrument must have been in calibration.
         // Tests with no linked equipment (manual / field tests) are allowed; calibrationVerified stays false.
         let calibrationVerified: boolean | undefined;
-        if (transition === "approve" && t.equipmentId) {
+        if (action === "approve" && t.equipmentId) {
           const eq = await tx.equipment.findUnique({ where: { id: t.equipmentId } });
           if (!eq) {
             return reply.status(409).send({ error: { code: "CALIBRATION_BLOCK", message: "Linked equipment was not found, so its calibration cannot be verified." } });
@@ -237,22 +233,27 @@ export async function testRoutes(app: FastifyInstance) {
           data: {
             ...(calibrationVerified ? { calibrationVerified } : {}),
             status: move.to,
-            ...(transition === "review"  ? { reviewedById: userId, reviewedAt: now } : {}),
-            ...(transition === "approve" ? { approvedById: userId, approvedAt: now } : {}),
-            ...(transition === "submit"  ? { completedAt: now } : {}),
+            ...(action === "review"  ? { reviewedById: userId, reviewedAt: now } : {}),
+            ...(action === "approve" ? { approvedById: userId, approvedAt: now } : {}),
+            ...(action === "submit"  ? { completedAt: now } : {}),
           },
         });
+        // Decisions and notes land in the test's comment thread (what the technician sees).
+        if (comment) {
+          await tx.testComment.create({
+            data: { tenantId, testId: id, authorEmail: email, authorName: localPart(email), kind: action, body: comment },
+          });
+        }
         await appendAudit(tx, tenantId, {
-          ts: now.toISOString(),
           userEmail: email,
           userName: localPart(email),
           userRole: role,
-          action: transition,
+          action,
           entity: "test",
           entityId: id,
           diff: [
             { field: "status", from: t.status, to: move.to },
-            ...(body.comment ? [{ field: "comment", from: "—", to: body.comment }] : []),
+            ...(comment ? [{ field: "comment", from: "—", to: comment }] : []),
           ],
           ip: req.ip,
           userAgent: userAgentOf(req),
@@ -262,6 +263,48 @@ export async function testRoutes(app: FastifyInstance) {
     });
   }
 
+  // ---------------------------------------------------------------- comments
+  const CommentBody = z.object({ body: z.string().trim().min(1).max(2000) });
+  const canComment = (req: { actor: { permissions: string[]; isSuperAdmin: boolean } | null }) =>
+    !!req.actor && (req.actor.isSuperAdmin || COMMENT_PERMISSIONS.some((p) => req.actor!.permissions.includes(p)));
+
+  app.get("/v1/operations/tests/:id/comments", { onRequest: [app.requirePage("tests")] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    return withTenant(req.actor!.tenantId, async (tx) => {
+      const t = await tx.test.findUnique({ where: { id }, select: { id: true } });
+      if (!t) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Test ${id}` } });
+      const rows = await tx.testComment.findMany({ where: { testId: id }, orderBy: { createdAt: "asc" } });
+      return {
+        items: rows.map((c) => ({
+          id: c.id, kind: c.kind, body: c.body, authorEmail: c.authorEmail,
+          authorName: c.authorName, createdAt: c.createdAt.toISOString(),
+        })),
+      };
+    });
+  });
+
+  app.post("/v1/operations/tests/:id/comments", { onRequest: [app.requireAuth] }, async (req, reply) => {
+    if (!canComment(req)) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "You cannot comment on tests." } });
+    const { id } = req.params as { id: string };
+    const { body } = CommentBody.parse(req.body);
+    const { tenantId, email, role } = req.actor!;
+    return withTenant(tenantId, async (tx) => {
+      const t = await tx.test.findUnique({ where: { id }, select: { id: true } });
+      if (!t) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Test ${id}` } });
+      const c = await tx.testComment.create({
+        data: { tenantId, testId: id, authorEmail: email, authorName: localPart(email), kind: "comment", body },
+      });
+      await appendAudit(tx, tenantId, {
+        userEmail: email, userName: localPart(email), userRole: role,
+        action: "comment", entity: "test", entityId: id,
+        diff: [{ field: "comment", from: "—", to: body.length > 200 ? `${body.slice(0, 200)}...` : body }],
+        ip: req.ip, userAgent: userAgentOf(req),
+      });
+      reply.code(201);
+      return { id: c.id, kind: c.kind, body: c.body, authorEmail: c.authorEmail, authorName: c.authorName, createdAt: c.createdAt.toISOString() };
+    });
+  });
+
   // -------------------------------------------------------------------- sign
   app.post("/v1/operations/tests/:id/sign", { onRequest: [app.requirePerm("test:sign")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -270,7 +313,7 @@ export async function testRoutes(app: FastifyInstance) {
     return withTenant(tenantId, async (tx) => {
       const t = await tx.test.findUnique({ where: { id } });
       if (!t) return reply.status(404).send({ error: { code: "NOT_FOUND", message: `Test ${id}` } });
-      const signMove: Transition = TRANSITIONS.sign;
+      const signMove = TRANSITIONS.sign;
       if (!signMove.from.includes(t.status)) {
         throw conflict(`Test ${id} cannot be signed from status "${t.status}"`);
       }
