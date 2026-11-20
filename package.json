@@ -17,6 +17,7 @@
     "prisma:studio": "prisma studio",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "lint": "tsc --noEmit",
+    "test": "tsx --test src/engine/engine.test.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },
