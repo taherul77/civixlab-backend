@@ -10,6 +10,10 @@ import { userAgentOf, localPart } from "@/lib/req";
 // Schemas
 // ---------------------------------------------------------------------------
 
+const DEFAULT_NOTE: Record<WorkflowAction, string> = {
+  submit: "Submitted for review", review: "Marked as reviewed", approve: "Approved", return: "Returned for correction", sign: "Signed",
+};
+
 const TestStatus = z.enum(["draft", "submitted", "reviewed", "approved", "returned", "rejected", "signed"]);
 
 const ListQuery = z.object({
@@ -228,22 +232,29 @@ export async function testRoutes(app: FastifyInstance) {
           calibrationVerified = true;
         }
 
-        const updated = await tx.test.update({
-          where: { id },
+        // A returned test starts a new review cycle: earlier review/approval marks must not carry over.
+        const resetCycle = action === "return" || (action === "submit" && t.status !== "draft");
+        // Guarded by the current status so two reviewers acting at once cannot both succeed.
+        const moved = await tx.test.updateMany({
+          where: { id, status: { in: move.from } },
           data: {
             ...(calibrationVerified ? { calibrationVerified } : {}),
             status: move.to,
             ...(action === "review"  ? { reviewedById: userId, reviewedAt: now } : {}),
             ...(action === "approve" ? { approvedById: userId, approvedAt: now } : {}),
             ...(action === "submit"  ? { completedAt: now } : {}),
+            ...(resetCycle ? { reviewedById: null, reviewedAt: null, approvedById: null, approvedAt: null, calibrationVerified: false } : {}),
           },
         });
-        // Decisions and notes land in the test's comment thread (what the technician sees).
-        if (comment) {
-          await tx.testComment.create({
-            data: { tenantId, testId: id, authorEmail: email, authorName: localPart(email), kind: action, body: comment },
-          });
-        }
+        if (moved.count === 0) throw conflict(`Test ${id} was changed by someone else; reload and try again.`);
+        const updated = await tx.test.findUnique({ where: { id } });
+        // Every decision shows in the thread (with the note when there is one).
+        await tx.testComment.create({
+          data: {
+            tenantId, testId: id, authorEmail: email, authorName: localPart(email), kind: action,
+            body: comment || DEFAULT_NOTE[action],
+          },
+        });
         await appendAudit(tx, tenantId, {
           userEmail: email,
           userName: localPart(email),
@@ -283,7 +294,7 @@ export async function testRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/operations/tests/:id/comments", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.post("/v1/operations/tests/:id/comments", { onRequest: [app.requirePage("tests")] }, async (req, reply) => {
     if (!canComment(req)) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "You cannot comment on tests." } });
     const { id } = req.params as { id: string };
     const { body } = CommentBody.parse(req.body);
