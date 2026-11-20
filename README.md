@@ -181,3 +181,16 @@ npx prisma migrate deploy     # apply migrations
 npm run db:seed               # WARNING: wipes all tenant data, recreates Super Admin
 npm run dev
 ```
+
+## Demo data (to check every page)
+
+With the API running (`npm run dev`):
+
+```bash
+npm run demo:data          # API_URL=http://localhost:4001 npm run demo:data  for another port
+```
+
+Creates the company **Demo Lab** through the real API: master setup, three roles with page access,
+three users, 3 projects, 18 samples, 4 equipment (one overdue), and ~17 tests evaluated by the test engine
+and moved through draft / submitted / reviewed / approved. Safe to re-run (stops if the company already has
+projects) and it never deletes anything. Logins are printed at the end (company admin `admin@demo.sa` / `Demo1234!`).
