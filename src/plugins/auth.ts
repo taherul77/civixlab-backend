@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import jwt from "@fastify/jwt";
 import { env } from "@/config/env";
+import { withTenant } from "@/db/prisma";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -23,6 +24,8 @@ declare module "fastify" {
     requireAuth: (req: FastifyRequest) => Promise<void>;
     requirePerm: (perm: string) => (req: FastifyRequest) => Promise<void>;
     requireSuperAdmin: (req: FastifyRequest) => Promise<void>;
+    /** Enforce the per-role page matrix (view/create/edit/delete) set on /security. */
+    requirePage: (pageId: string, action?: "view" | "create" | "edit" | "delete") => (req: FastifyRequest) => Promise<void>;
   }
 }
 
@@ -79,6 +82,38 @@ export const authPlugin = fp(async function (app: FastifyInstance) {
       throw err;
     }
   });
+
+  // Page-matrix guard. Mirrors the frontend's hasPageAction():
+  //  - Super Admin bypasses.
+  //  - A role with NO stored rows gets the default (view everything, nothing else).
+  //  - A role with rows is judged by its row for this page (missing row = denied).
+  //  - Multiple roles: any role granting the action is enough.
+  //  - Tenant Admin with no stored rows keeps full access so a fresh company is usable.
+  app.decorate("requirePage", (pageId: string, action: "view" | "create" | "edit" | "delete" = "view") =>
+    async (req: FastifyRequest) => {
+      await app.requireAuth(req);
+      const actor = req.actor!;
+      if (actor.isSuperAdmin) return;
+      const forbid = () => {
+        const err: Error & { statusCode?: number } = new Error(`FORBIDDEN: ${action} on ${pageId}`);
+        err.statusCode = 403;
+        return err;
+      };
+      if (!actor.tenantId || actor.roles.length === 0) throw forbid();
+
+      const rows = await withTenant(actor.tenantId, (tx) =>
+        tx.rolePagePermission.findMany({
+          where: { tenantId: actor.tenantId, role: { in: actor.roles } },
+        }),
+      );
+      const allowed = actor.roles.some((role) => {
+        const own = rows.filter((r) => r.role === role);
+        if (own.length === 0) return role === "Tenant Admin" || action === "view";
+        const row = own.find((r) => r.pageId === pageId);
+        return !!row?.[action];
+      });
+      if (!allowed) throw forbid();
+    });
 
   app.decorate("requireSuperAdmin", async (req: FastifyRequest) => {
     await app.requireAuth(req);

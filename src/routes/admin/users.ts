@@ -62,7 +62,7 @@ const SAFE_USER_SELECT = {
 
 export async function userRoutes(app: FastifyInstance) {
   // List all users belonging to the current tenant (via memberships).
-  app.get("/v1/admin/users", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/admin/users", { onRequest: [app.requirePage("users")] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const memberships = await tx.userTenantMembership.findMany({
         where: { tenantId: req.actor!.tenantId },
@@ -83,6 +83,14 @@ export async function userRoutes(app: FastifyInstance) {
   app.post("/v1/admin/users/invite", { onRequest: [app.requirePerm("user:invite")] }, async (req, reply) => {
     const body = InviteBody.parse(req.body);
     const { tenantId, email: actorEmail, role: actorRole } = req.actor!;
+
+    const tenantRow = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { maxUsers: true } });
+    const activeMembers = await prisma.userTenantMembership.count({ where: { tenantId, isActive: true } });
+    if (tenantRow && activeMembers >= tenantRow.maxUsers) {
+      return reply.status(402).send({
+        error: { code: "PLAN_LIMIT", message: `User limit reached (${tenantRow.maxUsers}). Contact your platform administrator.` },
+      });
+    }
 
     // The user record is global. Either reuse an existing account or create a
     // new one. Either way, we then attach a membership for this tenant.
