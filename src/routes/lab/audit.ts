@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { withTenant } from "@/db/prisma";
-import { verifyChain, type ChainEntry } from "@/lib/audit";
+import { verifyChain, toChainEntry, type ChainEntry } from "@/lib/audit";
 
 const ListQuery = z.object({
   q: z.string().optional(),
@@ -50,18 +50,7 @@ export async function auditRoutes(app: FastifyInstance) {
   app.get("/v1/lab/audit/verify", { onRequest: [app.requirePerm("audit:read")] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const items = await tx.auditLog.findMany({ orderBy: { createdAt: "desc" } });
-      const chain: ChainEntry[] = items.map((a) => ({
-        id: a.id,
-        ts: a.createdAt.toISOString(),
-        user: a.userEmail ?? "—",
-        action: a.action,
-        entity: a.entityType,
-        entityId: a.entityId,
-        diff: undefined,                 // server-side verify uses stored hash directly
-        ip: a.ipAddress,
-        prevHash: a.prevHash,
-        hash: a.hash,
-      }));
+      const chain: ChainEntry[] = items.map(toChainEntry);
       return verifyChain(chain);
     });
   });
