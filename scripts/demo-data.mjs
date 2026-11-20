@@ -183,7 +183,7 @@ async function main() {
     const stage = ti % 4;
     if (stage >= 1) await call("POST", `/v1/operations/tests/${t.id}/submit`, { ...T, body: {} });
     if (stage >= 2) await call("POST", `/v1/operations/tests/${t.id}/review`, { ...T, body: {} });
-    if (stage >= 3 && body.passFailStatus === "pass") await call("POST", `/v1/operations/tests/${t.id}/approve`, { ...T, body: {} });
+    if (stage >= 3 && body.passFailStatus === "pass") await call("POST", `/v1/operations/tests/${t.id}/approve`, { ...T, body: {}, allow: [409] }); // 409 = calibration block
     ti++;
   }
   console.log(`Created ${projects.length} projects, ${samples.length} samples, ${equipment.length} equipment, ${ti} tests (${results.pass} pass / ${results.fail} fail${results.skipped ? `, ${results.skipped} skipped` : ""})`);

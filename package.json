@@ -18,7 +18,7 @@
     "demo:data": "node scripts/demo-data.mjs",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/engine/engine.test.ts src/lib/audit.test.ts src/db/tenant-models.test.ts",
+    "test": "tsx --test src/engine/engine.test.ts src/lib/audit.test.ts src/db/tenant-models.test.ts src/lib/calibration.test.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },

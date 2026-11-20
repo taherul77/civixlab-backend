@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { withTenant } from "@/db/prisma";
 import { appendAudit } from "@/lib/audit";
+import { calibrationBlockReason } from "@/lib/calibration";
 import { userAgentOf, localPart } from "@/lib/req";
 
 // ---------------------------------------------------------------------------
@@ -215,9 +216,24 @@ export async function testRoutes(app: FastifyInstance) {
           throw conflict(`Test ${id} cannot ${transition} from status "${t.status}"`);
         }
         const now = new Date();
+
+        // Approval gate (spec section 8): the linked instrument must have been in calibration.
+        let calibrationVerified: boolean | undefined;
+        if (transition === "approve" && t.equipmentId) {
+          const eq = await tx.equipment.findUnique({ where: { id: t.equipmentId } });
+          if (eq) {
+            const reason = calibrationBlockReason(eq, t.testDate ?? t.createdAt);
+            if (reason) {
+              return reply.status(409).send({ error: { code: "CALIBRATION_BLOCK", message: reason } });
+            }
+            calibrationVerified = true;
+          }
+        }
+
         const updated = await tx.test.update({
           where: { id },
           data: {
+            ...(calibrationVerified ? { calibrationVerified } : {}),
             status: move.to,
             ...(transition === "review"  ? { reviewedById: userId, reviewedAt: now } : {}),
             ...(transition === "approve" ? { approvedById: userId, approvedAt: now } : {}),
