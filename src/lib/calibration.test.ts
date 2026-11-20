@@ -14,6 +14,12 @@ test("expired before the test was performed: blocked", () => {
   assert.match(calibrationBlockReason(eq(), new Date("2026-10-05"))!, /expired on 2026-10-01/);
 });
 
+test("the due date itself is valid through the end of that day", () => {
+  assert.equal(calibrationBlockReason(eq(), new Date("2026-10-01T09:00:00Z")), null);
+  assert.equal(calibrationBlockReason(eq(), new Date("2026-10-01T23:59:59Z")), null);
+  assert.ok(calibrationBlockReason(eq(), new Date("2026-10-02T00:00:00Z")));
+});
+
 test("a test done while calibrated stays valid after the due date passes", () => {
   // Approving in December a test performed in September is fine.
   assert.equal(calibrationBlockReason(eq(), new Date("2026-09-30")), null);
