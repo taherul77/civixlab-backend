@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma, withTenant } from "@/db/prisma";
-import { appendAudit, verifyChain, type ChainEntry } from "@/lib/audit";
+import { appendAudit, verifyChain, toChainEntry, type ChainEntry } from "@/lib/audit";
 import { userAgentOf, localPart } from "@/lib/req";
 
 const ReportFormat = z.enum(["pdf", "docx", "xlsx"]);
@@ -121,18 +121,7 @@ export async function reportRoutes(app: FastifyInstance) {
         orderBy: { createdAt: "desc" },
       });
       const fullChainRaw = await tx.auditLog.findMany({ orderBy: { createdAt: "desc" } });
-      const fullChain: ChainEntry[] = fullChainRaw.map((a) => ({
-        id: a.id,
-        ts: a.createdAt.toISOString(),
-        user: a.userEmail ?? "—",
-        action: a.action,
-        entity: a.entityType,
-        entityId: a.entityId,
-        diff: undefined,
-        ip: a.ipAddress,
-        prevHash: a.prevHash,
-        hash: a.hash,
-      }));
+      const fullChain: ChainEntry[] = fullChainRaw.map(toChainEntry);
       const integrity = verifyChain(fullChain);
       const signEvt    = trail.find((a) => a.action === "sign");
       const approveEvt = trail.find((a) => a.action === "approve");
