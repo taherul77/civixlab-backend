@@ -1,9 +1,21 @@
 import { buildSchema, overallOf, EngineValidationError, type EvaluationResult, type TestTemplateDef } from "./types";
-import { concreteTemplates } from "./templates/concrete";
+import { concreteTemplates, compressiveStrength, placementTemperature } from "./templates/concrete";
+import { waterTemplates } from "./templates/water";
+import { legacyTemplates } from "./schemas/adapter";
 
 export * from "./types";
 
-const ALL: TestTemplateDef[] = [...concreteTemplates];
+// Strict, hand-written concrete templates keep their CONC-* codes. A1 and A4 have
+// bespoke frontend forms (not in the schema catalog), so they are also aliased
+// under the short code. Schema-driven templates win for every other short code.
+const alias = (t: TestTemplateDef, code: string): TestTemplateDef => ({ ...t, code });
+const ALL: TestTemplateDef[] = [
+  ...legacyTemplates,
+  ...concreteTemplates,
+  ...waterTemplates,
+  alias(compressiveStrength, "A1"),
+  alias(placementTemperature, "A4"),
+];
 const BY_CODE = new Map(ALL.map((t) => [t.code, t]));
 
 export const listTemplates = () => ALL;
