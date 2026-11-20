@@ -107,7 +107,7 @@ export async function testRoutes(app: FastifyInstance) {
   });
 
   // ------------------------------------------------------------------ create
-  app.post("/v1/operations/tests", { onRequest: [app.requirePerm("test:create")] }, async (req, reply) => {
+  app.post("/v1/operations/tests", { onRequest: [app.requirePage("tests", "create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -161,7 +161,7 @@ export async function testRoutes(app: FastifyInstance) {
   });
 
   // ------------------------------------------------------------------ update
-  app.patch("/v1/operations/tests/:id", { onRequest: [app.requirePerm("test:update")] }, async (req, reply) => {
+  app.patch("/v1/operations/tests/:id", { onRequest: [app.requirePage("tests", "edit")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const patch = UpdateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;

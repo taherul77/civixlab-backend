@@ -44,7 +44,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/lab/equipment", { onRequest: [app.requirePerm("equipment:create")] }, async (req, reply) => {
+  app.post("/v1/lab/equipment", { onRequest: [app.requirePage("equipment", "create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {

@@ -83,7 +83,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/operations/projects", { onRequest: [app.requirePerm("project:create")] }, async (req, reply) => {
+  app.post("/v1/operations/projects", { onRequest: [app.requirePage("projects", "create")] }, async (req, reply) => {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -137,7 +137,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.patch("/v1/operations/projects/:id", { onRequest: [app.requirePerm("project:update")] }, async (req, reply) => {
+  app.patch("/v1/operations/projects/:id", { onRequest: [app.requirePage("projects", "edit")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const patch = UpdateBody.parse(req.body);
     const { tenantId, email, role } = req.actor!;
@@ -189,7 +189,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/operations/projects/:id", { onRequest: [app.requirePerm("project:delete")] }, async (req, reply) => {
+  app.delete("/v1/operations/projects/:id", { onRequest: [app.requirePage("projects", "delete")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { tenantId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
@@ -252,7 +252,7 @@ export async function projectRoutes(app: FastifyInstance) {
    * `completed` (already sent / terminal). Stamps `sentById` + `sentAt` and
    * flips status to `in_process`.
    */
-  app.post("/v1/operations/projects/:id/send", { onRequest: [app.requirePerm("project:update")] }, async (req, reply) => {
+  app.post("/v1/operations/projects/:id/send", { onRequest: [app.requirePage("projects", "edit")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
