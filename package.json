@@ -15,6 +15,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
+    "demo:data": "node scripts/demo-data.mjs",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/engine/engine.test.ts src/lib/audit.test.ts",
