@@ -40,6 +40,7 @@ model Tenant {
   projects    Project[]
   samples     Sample[]
   tests       Test[]
+  testComments TestComment[]
   waterTests  WaterTest[]
   equipment   Equipment[]
   reports     Report[]
@@ -372,6 +373,7 @@ model Test {
   approvedAt            DateTime? @map("approved_at") @db.Timestamptz
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
+  comments   TestComment[]
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sample     Sample     @relation(fields: [sampleId], references: [id])
   project    Project    @relation(fields: [projectId], references: [id])
@@ -419,6 +421,25 @@ model TestTemplate {
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("test_templates")
+}
+
+/// Comment thread on a test; also records workflow decisions (return / review / approve).
+model TestComment {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  testId      String   @map("test_id") @db.Uuid
+  authorEmail String   @map("author_email") @db.VarChar(255)
+  authorName  String?  @map("author_name") @db.VarChar(255)
+  /// comment | return | review | approve | submit
+  kind        String   @default("comment") @db.VarChar(30)
+  body        String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  test   Test   @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, testId, createdAt], name: "idx_test_comments_test")
+  @@map("test_comments")
 }
 
 // ---------------------------------------------------------------------------

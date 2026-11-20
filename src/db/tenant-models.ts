@@ -9,7 +9,7 @@
 export const TENANT_MODELS = new Set([
   "UserTenantMembership", "Project", "Sample", "Test", "WaterTest", "Equipment",
   "AuditLog", "Report", "Role", "RolePagePermission", "Laboratory", "Department",
-  "Client", "Engineer",
+  "Client", "Engineer", "TestComment",
 ]);
 
 /** Models that have a tenantId column but are deliberately not auto-scoped. */
