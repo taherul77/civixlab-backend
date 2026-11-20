@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { env } from "@/config/env";
+import { TENANT_MODELS } from "@/db/tenant-models";
 
 // Prisma 7 no longer reads `url` from schema.prisma. The runtime client now
 // constructs its own pg connection pool via @prisma/adapter-pg and hands it
@@ -22,11 +23,7 @@ const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
  */
 const tenantStore = new AsyncLocalStorage<{ tenantId: string }>();
 
-const TENANT_MODELS = new Set([
-  "UserTenantMembership", "Project", "Sample", "Test", "WaterTest", "Equipment",
-  "AuditLog", "Report", "Role", "RolePagePermission", "Laboratory", "Department",
-  "Client", "Engineer",
-]);
+
 
 const WHERE_OPS = new Set([
   "findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow",
