@@ -8,7 +8,7 @@ function modelsWithTenantId(): { name: string; nullable: boolean }[] {
   const schema = readFileSync(new URL("../../prisma/schema.prisma", import.meta.url), "utf8");
   const out: { name: string; nullable: boolean }[] = [];
   for (const m of schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {
-    const field = m[2]!.match(/^\s*tenantId\s+String(\?)?/m);
+    const field = m[2]!.match(/^\s*tenantId\s+\w+(\?)?/m);
     if (field) out.push({ name: m[1]!, nullable: field[1] === "?" });
   }
   return out;
@@ -16,7 +16,7 @@ function modelsWithTenantId(): { name: string; nullable: boolean }[] {
 
 test("every model with a tenantId column is auto-scoped or explicitly exempt", () => {
   const found = modelsWithTenantId();
-  assert.ok(found.length >= 10, "schema parsing found too few tenant models");
+  assert.ok(found.length >= TENANT_MODELS.size, "schema parsing found fewer tenant models than TENANT_MODELS lists");
   for (const { name } of found) {
     assert.ok(
       TENANT_MODELS.has(name) || TENANT_ID_EXEMPT.has(name),
@@ -34,6 +34,10 @@ test("exempt models really have a nullable tenantId (global rows)", () => {
 });
 
 test("TENANT_MODELS only lists models that exist with a tenantId", () => {
-  const names = new Set(modelsWithTenantId().map((m) => m.name));
-  for (const name of TENANT_MODELS) assert.ok(names.has(name), `${name} in TENANT_MODELS has no tenantId column`);
+  const byName = new Map(modelsWithTenantId().map((m) => [m.name, m]));
+  for (const name of TENANT_MODELS) {
+    const m = byName.get(name);
+    assert.ok(m, `${name} in TENANT_MODELS has no tenantId column`);
+    assert.equal(m.nullable, false, `${name} has a nullable tenantId; scoping would hide its global rows (use TENANT_ID_EXEMPT)`);
+  }
 });

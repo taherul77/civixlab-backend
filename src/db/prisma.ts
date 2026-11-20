@@ -23,8 +23,6 @@ const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
  */
 const tenantStore = new AsyncLocalStorage<{ tenantId: string }>();
 
-
-
 const WHERE_OPS = new Set([
   "findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow",
   "count", "aggregate", "groupBy", "update", "updateMany", "delete", "deleteMany", "upsert",
