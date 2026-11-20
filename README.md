@@ -170,3 +170,14 @@ spec's *"data leakage prevented at database level"* requirement (§3).
 
 Internal — see project root.
 # civixlab-backend
+
+---
+
+## Local database bring-up (Windows / Docker Desktop)
+
+```bash
+docker compose up -d          # Postgres 16 + Redis 7 (start Docker Desktop first)
+npx prisma migrate deploy     # apply migrations
+npm run db:seed               # WARNING: wipes all tenant data, recreates Super Admin
+npm run dev
+```
