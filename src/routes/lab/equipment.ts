@@ -28,14 +28,14 @@ const ConnectBody = z.object({
 });
 
 export async function equipmentRoutes(app: FastifyInstance) {
-  app.get("/v1/lab/equipment", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/lab/equipment", { onRequest: [app.requirePage("equipment")] }, async (req) => {
     return withTenant(req.actor!.tenantId, async (tx) => {
       const items = await tx.equipment.findMany({ orderBy: { createdAt: "desc" } });
       return { items, total: items.length };
     });
   });
 
-  app.get("/v1/lab/equipment/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/lab/equipment/:id", { onRequest: [app.requirePage("equipment")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.equipment.findUnique({ where: { id } });

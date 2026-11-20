@@ -69,7 +69,7 @@ function conflict(message: string) {
 // ---------------------------------------------------------------------------
 
 export async function testRoutes(app: FastifyInstance) {
-  app.get("/v1/operations/tests", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/operations/tests", { onRequest: [app.requirePage("tests")] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -97,7 +97,7 @@ export async function testRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/operations/tests/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/operations/tests/:id", { onRequest: [app.requirePage("tests")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.test.findUnique({ where: { id } });

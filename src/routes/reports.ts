@@ -14,7 +14,7 @@ function reportNumberFor(testCode: string): string {
 
 export async function reportRoutes(app: FastifyInstance) {
   // Hydrate the report context — test + sample + project + signature trail.
-  app.get("/v1/reports/test/:testId", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/reports/test/:testId", { onRequest: [app.requirePage("reports")] }, async (req, reply) => {
     const { testId } = req.params as { testId: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const test = await tx.test.findUnique({ where: { id: testId } });

@@ -35,7 +35,7 @@ const CreateBody = z.object({
 const UpdateBody = CreateBody.partial();
 
 export async function projectRoutes(app: FastifyInstance) {
-  app.get("/v1/operations/projects", { onRequest: [app.requireAuth] }, async (req) => {
+  app.get("/v1/operations/projects", { onRequest: [app.requirePage("projects")] }, async (req) => {
     const q = ListQuery.parse(req.query);
     return withTenant(req.actor!.tenantId, async (tx) => {
       const where: Record<string, unknown> = {};
@@ -74,7 +74,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/v1/operations/projects/:id", { onRequest: [app.requireAuth] }, async (req, reply) => {
+  app.get("/v1/operations/projects/:id", { onRequest: [app.requirePage("projects")] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     return withTenant(req.actor!.tenantId, async (tx) => {
       const row = await tx.project.findUnique({ where: { id } });
