@@ -84,7 +84,7 @@ export async function laboratoriesRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/master-setup/laboratories", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.post("/v1/master-setup/laboratories", { onRequest: [app.requirePage("laboratory", "create")] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     const body = CreateBody.parse(req.body);
@@ -101,7 +101,7 @@ export async function laboratoriesRoutes(app: FastifyInstance) {
     });
   });
 
-  app.patch("/v1/master-setup/laboratories/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/laboratories/:id", { onRequest: [app.requirePage("laboratory", "edit")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -122,7 +122,7 @@ export async function laboratoriesRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/master-setup/laboratories/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.delete("/v1/master-setup/laboratories/:id", { onRequest: [app.requirePage("laboratory", "delete")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;

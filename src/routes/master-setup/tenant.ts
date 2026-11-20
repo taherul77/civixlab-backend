@@ -63,7 +63,7 @@ export async function tenantRoutes(app: FastifyInstance) {
   });
 
   // Update the current tenant — restricted to settings:update (Tenant Admin / Super Admin).
-  app.patch("/v1/master-setup/tenant", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/tenant", { onRequest: [app.requirePage("company", "edit")] }, async (req, reply) => {
     const body = UpdateBody.parse(req.body);
 
     if (body.subdomain) {
@@ -97,7 +97,7 @@ export async function tenantRoutes(app: FastifyInstance) {
     return laboratory;
   });
 
-  app.put("/v1/master-setup/tenant/laboratory", { onRequest: [app.requirePerm("settings:update")] }, async (req) => {
+  app.put("/v1/master-setup/tenant/laboratory", { onRequest: [app.requirePage("laboratory", "edit")] }, async (req) => {
     const body = LaboratoryBody.parse(req.body);
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.actor!.tenantId },

@@ -79,7 +79,7 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/v1/master-setup/engineers", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.post("/v1/master-setup/engineers", { onRequest: [app.requirePage("engineers", "create")] }, async (req, reply) => {
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
     const body = CreateBody.parse(req.body);
@@ -112,7 +112,7 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.patch("/v1/master-setup/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.patch("/v1/master-setup/engineers/:id", { onRequest: [app.requirePage("engineers", "edit")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
@@ -133,7 +133,7 @@ export async function engineersRoutes(app: FastifyInstance) {
     });
   });
 
-  app.delete("/v1/master-setup/engineers/:id", { onRequest: [app.requirePerm("settings:update")] }, async (req, reply) => {
+  app.delete("/v1/master-setup/engineers/:id", { onRequest: [app.requirePage("engineers", "delete")] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const tenantId = requireTenantContext(req, reply);
     if (!tenantId) return;
