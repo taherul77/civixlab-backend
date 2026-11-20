@@ -74,7 +74,8 @@ async function build() {
       }
     },
   );
-  await app.register(cors, { origin: true, credentials: true });
+  // content-disposition must be exposed or the web app (another origin) cannot read the PDF filename.
+  await app.register(cors, { origin: true, credentials: true, exposedHeaders: ["content-disposition"] });
   await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
   await app.register(errorHandlerPlugin);
   await app.register(swaggerPlugin);
