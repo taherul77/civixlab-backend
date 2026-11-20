@@ -18,6 +18,7 @@ import { superRoutes } from "@/routes/super";
 import { projectRoutes } from "@/routes/operations/projects";
 import { sampleRoutes } from "@/routes/operations/samples";
 import { testRoutes } from "@/routes/operations/tests";
+import { testTemplateRoutes } from "@/routes/operations/test-templates";
 // Lab module
 import { equipmentRoutes } from "@/routes/lab/equipment";
 import { auditRoutes } from "@/routes/lab/audit";
@@ -84,6 +85,7 @@ async function build() {
   await app.register(projectRoutes);
   await app.register(sampleRoutes);
   await app.register(testRoutes);
+  await app.register(testTemplateRoutes);
   await app.register(equipmentRoutes);
   await app.register(userRoutes);
   await app.register(auditRoutes);
