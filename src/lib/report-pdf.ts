@@ -200,7 +200,7 @@ export async function renderReportPdf(d: ReportDoc, opts: { compress?: boolean }
   ensure(60);
   doc.font("Courier").fontSize(8).fillColor(INK).text(d.seal.hash, M, doc.y, { width: W });
   doc.font("Helvetica").fontSize(8).fillColor(MUTED).moveDown(0.4)
-    .text("The seal covers the test inputs, results, pass/fail outcome and approval. Verification reports whether the stored content still matches it.", M, doc.y, { width: W });
+    .text("The seal covers the test inputs, the results and checks as issued, the pass/fail outcome and the approval. Project and sample details are not sealed. Verification reports whether the stored content still matches the seal.", M, doc.y, { width: W });
   doc.font("Helvetica").fontSize(8).fillColor(BRAND).moveDown(0.4).text(d.verifyUrl, M, doc.y, { width: W, link: d.verifyUrl, underline: true });
 
   doc.moveDown(1);

@@ -68,54 +68,68 @@ export function sealContent(c: ReportContext) {
   };
 }
 
-export const currentSeal = (c: ReportContext) => sealOf(sealContent(c));
+/** The evaluated output frozen at issue time, so later engine/template changes cannot alter an issued report. */
+export interface EvalSnapshot {
+  results: ReportDoc["results"];
+  checks: ReportDoc["checks"];
+  warnings: string[];
+}
+
+/** Seal over the test content AND the frozen evaluated output. */
+export const currentSeal = (c: ReportContext, snapshot: EvalSnapshot | null) =>
+  sealOf({ ...sealContent(c), evaluated: snapshot });
 
 export const conformityOf = (passFail: string | null): ReportDoc["conformity"] =>
   passFail === "pass" ? "conforms" : passFail === "fail" ? "does_not_conform" : "pending";
 
 export const verifyUrlFor = (reportNumber: string) => `${env.PUBLIC_VERIFY_BASE_URL.replace(/\/$/, "")}/${reportNumber}`;
 
-/** Turn the context into the document model. Re-evaluates with the test engine for labels and checks;
- *  falls back to the stored values if the template/inputs no longer evaluate. */
-export function buildReportDoc(c: ReportContext, report: { reportNumber: string; generatedAt: Date; seal: string }): ReportDoc {
+/** Evaluate once, at issue time. Falls back to the stored values if the template/inputs no longer evaluate. */
+export function evaluateSnapshot(c: ReportContext): EvalSnapshot {
+  const t = c.test;
+  try {
+    const ev = evaluate(t.testCode, (t.inputData ?? {}) as Record<string, unknown>);
+    return {
+      results: ev.rows
+        ? ev.rows.map((r) => ({ label: r.label, value: show(r.value), unit: r.unit }))
+        : Object.entries(ev.results).map(([k, v]) => ({ label: humanize(k), value: show(v) })),
+      checks: ev.checks.map((x) => ({ label: x.label, measured: show(x.measured), limit: x.limit, status: x.status })),
+      warnings: ev.warnings,
+    };
+  } catch {
+    const calc = (t.calculatedResults ?? {}) as Record<string, unknown>;
+    let results: ReportDoc["results"] = Object.entries(calc)
+      .filter(([k, v]) => k !== "primaryResult" && (typeof v === "number" || typeof v === "string" || typeof v === "boolean"))
+      .map(([k, v]) => ({ label: humanize(k), value: show(v) }));
+    const primary = calc.primaryResult as { value: number; unit?: string; label?: string } | undefined;
+    if (results.length === 0 && primary) results = [{ label: primary.label || "Result", value: String(primary.value), unit: primary.unit }];
+    return { results, checks: [], warnings: [] };
+  }
+}
+
+/** Turn the context + frozen snapshot into the document model. */
+export function buildReportDoc(
+  c: ReportContext,
+  report: { reportNumber: string; generatedAt: Date; seal: string },
+  snapshot: EvalSnapshot | null,
+): ReportDoc {
   const t = c.test;
   const tpl = getTemplate(t.testCode);
   const stored = (t.inputData ?? {}) as Record<string, unknown>;
-
-  let inputs: ReportDoc["inputs"] = [];
-  let results: ReportDoc["results"] = [];
-  let checks: ReportDoc["checks"] = [];
-  let warnings: string[] = [];
-
   const labelFor = (name: string) => {
     const f = tpl?.fields.find((x) => x.name === name);
     return f ? { label: f.label, unit: f.unit } : { label: humanize(name), unit: undefined };
   };
   // Template field order (as on the entry form); unknown keys go last, alphabetically.
   const order = (k: string) => { const i = tpl?.fields.findIndex((f) => f.name === k) ?? -1; return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
-  inputs = Object.entries(stored)
+  const inputs: ReportDoc["inputs"] = Object.entries(stored)
     .filter(([, v]) => v !== "" && v !== null && v !== undefined)
     .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
     .map(([k, v]) => {
       const { label, unit } = labelFor(k);
       return { label: unit ? `${label} (${unit})` : label, value: show(v) };
     });
-
-  try {
-    const ev = evaluate(t.testCode, stored);
-    results = ev.rows
-      ? ev.rows.map((r) => ({ label: r.label, value: show(r.value), unit: r.unit }))
-      : Object.entries(ev.results).map(([k, v]) => ({ label: humanize(k), value: show(v) }));
-    checks = ev.checks.map((x) => ({ label: x.label, measured: show(x.measured), limit: x.limit, status: x.status }));
-    warnings = ev.warnings;
-  } catch {
-    const calc = (t.calculatedResults ?? {}) as Record<string, unknown>;
-    results = Object.entries(calc)
-      .filter(([k, v]) => k !== "primaryResult" && (typeof v === "number" || typeof v === "string" || typeof v === "boolean"))
-      .map(([k, v]) => ({ label: humanize(k), value: show(v) }));
-    const primary = calc.primaryResult as { value: number; unit?: string; label?: string } | undefined;
-    if (results.length === 0 && primary) results = [{ label: primary.label || "Result", value: String(primary.value), unit: primary.unit }];
-  }
+  const { results, checks, warnings } = snapshot ?? { results: [], checks: [], warnings: [] };
 
   return {
     reportNumber: report.reportNumber,

@@ -4,7 +4,7 @@ import { prisma, withTenant, type Tx } from "@/db/prisma";
 import { appendAudit, verifyChain, toChainEntry } from "@/lib/audit";
 import { userAgentOf, localPart } from "@/lib/req";
 import { generateReportNumber, SEAL_ALGORITHM } from "@/lib/report-seal";
-import { buildReportDoc, conformityOf, currentSeal, loadReportContext, verifyUrlFor } from "@/lib/report-context";
+import { buildReportDoc, conformityOf, currentSeal, evaluateSnapshot, loadReportContext, verifyUrlFor, type EvalSnapshot } from "@/lib/report-context";
 import { renderReportPdf } from "@/lib/report-pdf";
 
 const ReportFormat = z.enum(["pdf", "docx", "xlsx"]);
@@ -21,8 +21,23 @@ async function allocateReportNumber(): Promise<string> {
 
 const notFound = (what: string) => ({ error: { code: "NOT_FOUND", message: what } });
 
-async function latestReport(tx: Tx, testId: string) {
-  return tx.report.findFirst({ where: { testId }, orderBy: { generatedAt: "desc" } });
+/** The current issued report of a test. Legacy "draft" and "superseded" rows are never "the report". */
+async function issuedReport(tx: Tx, testId: string) {
+  return tx.report.findFirst({ where: { testId, status: "issued" }, orderBy: { generatedAt: "desc" } });
+}
+
+interface StoredSeal { algorithm?: string; hash?: string; sealedAt?: string; snapshot?: EvalSnapshot }
+const sealOfRow = (r: { digitalSignature: unknown } | null | undefined): StoredSeal => (r?.digitalSignature as StoredSeal | null) ?? {};
+
+/** True when the report's stored seal still matches the live test + its frozen snapshot. */
+const sealHolds = (stored: StoredSeal, ctx: Parameters<typeof currentSeal>[0]) =>
+  !!stored.hash && stored.hash === currentSeal(ctx, stored.snapshot ?? null);
+
+/** Public display name: never expose staff emails on the unauthenticated verify page. */
+async function displayName(email: string | null): Promise<string | null> {
+  if (!email) return null;
+  const u = await prisma.user.findUnique({ where: { email }, select: { firstName: true, lastName: true } });
+  return [u?.firstName, u?.lastName].filter(Boolean).join(" ") || "Laboratory staff";
 }
 
 export async function reportRoutes(app: FastifyInstance) {
@@ -33,15 +48,14 @@ export async function reportRoutes(app: FastifyInstance) {
     return withTenant(tenantId, async (tx) => {
       const ctx = await loadReportContext(tx, tenantId, testId);
       if (!ctx) return reply.status(404).send(notFound(`Test ${testId}`));
-      const report = await latestReport(tx, testId);
-      const seal = report?.digitalSignature as { hash?: string } | null;
+      const report = await issuedReport(tx, testId);
       return {
         test: ctx.test,
         sample: ctx.sample,
         project: ctx.project,
         reportNumber: report?.reportNumber ?? null,
         reportId: report?.id ?? null,
-        reportStatus: report ? (seal?.hash === currentSeal(ctx) ? "issued" : "stale") : "not_issued",
+        reportStatus: report ? (sealHolds(sealOfRow(report), ctx) ? "issued" : "stale") : "not_issued",
         generatedAt: report?.generatedAt.toISOString() ?? null,
         signedBy: ctx.people.signedBy ?? null,
         signatureSerial: ctx.people.signatureSerial ?? null,
@@ -65,19 +79,21 @@ export async function reportRoutes(app: FastifyInstance) {
       if (ctx.test.status !== "approved" && ctx.test.status !== "signed") {
         return reply.status(409).send({ error: { code: "NOT_APPROVED", message: "Only approved tests can be issued as reports." } });
       }
-      const seal = currentSeal(ctx);
-      const existing = await latestReport(tx, testId);
-      const existingSeal = (existing?.digitalSignature as { hash?: string } | null)?.hash;
-      if (existing && existingSeal === seal && existing.status === "issued") {
-        return { reportId: existing.id, reportNumber: existing.reportNumber, seal, reused: true };
+      // Serialise issuing per test so a double click cannot create two "issued" reports.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${testId}, 1))`;
+      const existing = await issuedReport(tx, testId);
+      if (existing && sealHolds(sealOfRow(existing), ctx)) {
+        return { reportId: existing.id, reportNumber: existing.reportNumber, seal: sealOfRow(existing).hash, reused: true };
       }
+      const snapshot = evaluateSnapshot(ctx);
+      const seal = currentSeal(ctx, snapshot);
 
       const reportNumber = await allocateReportNumber();
       if (existing) await tx.report.updateMany({ where: { testId, status: "issued" }, data: { status: "superseded" } });
       const report = await tx.report.create({
         data: {
           tenantId, testId, reportNumber, reportType: "pdf", status: "issued", generatedById: userId,
-          digitalSignature: { algorithm: SEAL_ALGORITHM, hash: seal, sealedAt: new Date().toISOString() },
+          digitalSignature: { algorithm: SEAL_ALGORITHM, hash: seal, sealedAt: new Date().toISOString(), snapshot } as never,
           verificationQrCode: verifyUrlFor(reportNumber),
         },
       });
@@ -101,15 +117,14 @@ export async function reportRoutes(app: FastifyInstance) {
       if (!report || !report.testId) return { error: notFound(`Report ${reportId}`), code: 404 as const };
       const ctx = await loadReportContext(tx, tenantId, report.testId);
       if (!ctx) return { error: notFound("Test for this report"), code: 404 as const };
-      const stored = (report.digitalSignature as { hash?: string } | null)?.hash;
-      const seal = currentSeal(ctx);
-      if (report.status !== "issued" || stored !== seal) {
+      const stored = sealOfRow(report);
+      if (report.status !== "issued" || !sealHolds(stored, ctx)) {
         return {
           error: { error: { code: "REPORT_STALE", message: "The test changed after this report was issued. Issue a new report." } },
           code: 409 as const,
         };
       }
-      return { doc: buildReportDoc(ctx, { reportNumber: report.reportNumber, generatedAt: report.generatedAt, seal }) };
+      return { doc: buildReportDoc(ctx, { reportNumber: report.reportNumber, generatedAt: report.generatedAt, seal: stored.hash! }, stored.snapshot ?? null) };
     });
     if (!built.doc) return reply.status(built.code ?? 500).send(built.error);
 
@@ -147,35 +162,46 @@ export async function reportRoutes(app: FastifyInstance) {
 
   // Public verification (QR target, no auth). Looks up by the unguessable report
   // number only, then answers: is it genuine, unchanged since issue, chain intact?
-  app.get("/v1/reports/verify/:key", async (req) => {
+  app.get("/v1/reports/verify/:key", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req) => {
     const { key } = req.params as { key: string };
     const report = await prisma.report.findUnique({ where: { reportNumber: key } });
     if (!report?.testId) return { reportNumber: key, found: false };
 
-    return withTenant(report.tenantId, async (tx) => {
+    const result = await withTenant(report.tenantId, async (tx) => {
       const ctx = await loadReportContext(tx, report.tenantId, report.testId!);
-      if (!ctx) return { reportNumber: key, found: false };
+      if (!ctx) return null;
       const chain = verifyChain((await tx.auditLog.findMany({ orderBy: { createdAt: "desc" } })).map(toChainEntry));
-      const stored = (report.digitalSignature as { hash?: string; algorithm?: string } | null) ?? null;
-      const sealOk = !!stored?.hash && stored.hash === currentSeal(ctx);
-      return {
-        reportNumber: report.reportNumber,
-        found: true,
-        issuer: ctx.tenant.name,
-        testCode: ctx.test.testCode,
-        standard: [ctx.test.standardBody, ctx.test.standardNumber].filter(Boolean).join(" "),
-        conformity: conformityOf(ctx.test.passFailStatus),
-        issuedAt: report.generatedAt.toISOString(),
-        status: report.status,                       // issued | superseded | draft
-        sealAlgorithm: stored?.algorithm ?? null,
-        sealOk,                                      // content unchanged since issue
-        approvedBy: ctx.people.approvedBy,
-        approvedAt: ctx.people.approvedAt,
-        signedBy: ctx.people.signedBy,
-        signatureSerial: ctx.people.signatureSerial,
-        chainOk: chain.ok,
-        brokenAt: chain.brokenAt,
-      };
+      return { ctx, chain };
     });
+    if (!result) return { reportNumber: key, found: false };
+    const { ctx, chain } = result;
+
+    const stored = sealOfRow(report);
+    const sealOk = sealHolds(stored, ctx);
+    // One explicit state so a client cannot mistake a superseded/unsealed report for a current one.
+    const state =
+      !stored.hash ? "unsealed" :
+      !sealOk ? "modified" :
+      report.status === "superseded" ? "superseded" :
+      report.status === "issued" ? "valid" : "unsealed";
+    return {
+      reportNumber: report.reportNumber,
+      found: true,
+      state,                                         // valid | superseded | modified | unsealed
+      issuer: ctx.tenant.name,
+      testCode: ctx.test.testCode,
+      standard: [ctx.test.standardBody, ctx.test.standardNumber].filter(Boolean).join(" "),
+      conformity: conformityOf(ctx.test.passFailStatus),
+      issuedAt: report.generatedAt.toISOString(),
+      status: report.status,
+      sealAlgorithm: stored.algorithm ?? null,
+      sealOk,                                        // test content + frozen results unchanged since issue
+      approvedBy: await displayName(ctx.people.approvedBy ?? null),
+      approvedAt: ctx.people.approvedAt,
+      signedBy: await displayName(ctx.people.signedBy ?? null),
+      signatureSerial: ctx.people.signatureSerial,
+      chainOk: chain.ok,
+      brokenAt: chain.brokenAt,
+    };
   });
 }

@@ -15,4 +15,10 @@ const Schema = z.object({
 });
 
 export const env = Schema.parse(process.env);
+
+// The QR code printed on every report points here and cannot be changed later,
+// so never fall back to localhost in production.
+if (env.NODE_ENV === "production" && !process.env.PUBLIC_VERIFY_BASE_URL) {
+  throw new Error("PUBLIC_VERIFY_BASE_URL must be set in production (the QR code on issued reports points to it).");
+}
 export type AppEnv = z.infer<typeof Schema>;
