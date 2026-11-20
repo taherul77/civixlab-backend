@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type FieldType = "number" | "integer" | "string" | "date" | "boolean" | "enum";
+export type FieldType = "number" | "integer" | "string" | "date" | "boolean" | "enum" | "number_list";
 
 /** Declarative field definition. One source of truth for the UI form AND server validation. */
 export interface FieldDef {
@@ -83,6 +83,9 @@ export function buildSchema(fields: FieldDef[]) {
         break;
       case "boolean":
         s = z.boolean();
+        break;
+      case "number_list":
+        s = z.array(z.number().min(f.min ?? -Infinity).max(f.max ?? Infinity)).min(1).max(50);
         break;
       case "date":
         s = z.string().refine((v) => !Number.isNaN(Date.parse(v)), `${f.label} must be a valid date`);

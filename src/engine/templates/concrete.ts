@@ -48,6 +48,9 @@ export const compressiveStrength: TestTemplateDef = {
       min: 30, max: 100, section: "Environment" },
     { name: "designStrengthMpa", label: "Design strength f'c", type: "number", unit: "MPa",
       min: 10, max: 100, section: "Specification" },
+    { name: "specimenLoadsKn", label: "Loads of all specimens in the set", type: "number_list", unit: "kN",
+      min: 0.01, max: 5000, section: "Specification",
+      help: "Optional. Used for the set average (SBC 304: average >= f'c)." },
   ],
   evaluate(i) {
     const cube = i.specimenType === "cube_150mm";
@@ -73,8 +76,27 @@ export const compressiveStrength: TestTemplateDef = {
         limit: `>= ${min} MPa`, unit: "MPa", status: final >= min ? "pass" : "fail",
       });
     }
+    const extra: Record<string, number> = {};
+    if (i.specimenLoadsKn) {
+      const f = (kn: number) => ((kn * 1000) / area) * factor;
+      const all = (i.specimenLoadsKn as number[]).map(f);
+      const avg = all.reduce((a, b) => a + b, 0) / all.length;
+      extra.averageStrengthMpa = round(avg, 1);
+      extra.specimenCount = all.length;
+      const spread = (Math.max(...all) - Math.min(...all)) / avg;
+      if (all.length > 1 && spread > 0.15)
+        warnings.push("Specimen spread exceeds 15% of the average: flag for review.");
+      if (i.designStrengthMpa !== undefined) {
+        checks.push({
+          id: "average", label: "Average strength >= f'c", measured: round(avg, 1),
+          limit: `>= ${i.designStrengthMpa} MPa`, unit: "MPa",
+          status: avg >= i.designStrengthMpa ? "pass" : "fail",
+        });
+      }
+    }
     return {
       results: {
+        ...extra,
         crossSectionalAreaMm2: round(area, 1),
         ldRatio: round(ld, 2),
         correctionFactor: round(factor, 3),

@@ -36,7 +36,7 @@ export const potableWater: TestTemplateDef = {
     { name: "sampleType", label: "Sample type", type: "enum", default: "tap",
       options: ["tap", "well", "tank", "bottle"], section: "Sample" },
     ...LIMITS.map((l): FieldDef => ({
-      name: l.name, label: l.label, type: "number", unit: l.unit || undefined, required: true, min: 0,
+      name: l.name, label: l.label, type: "number", unit: l.unit || undefined, required: l.name !== "nitriteMgL", min: 0,
       max: l.name === "ph" ? 14 : undefined, section: l.name.endsWith("Mpn") ? "Bacteriological" : "Chemical / physical",
     })),
   ],
@@ -45,7 +45,8 @@ export const potableWater: TestTemplateDef = {
     const warnings: string[] = [];
     let ratioSum = 0;
     for (const l of LIMITS) {
-      const v = i[l.name] as number;
+      const v = i[l.name] as number | undefined;
+      if (v === undefined) continue; // optional parameter not measured
       const okMax = v <= l.max;
       const okMin = l.min === undefined || v >= l.min;
       const ok = okMax && okMin;
@@ -63,7 +64,7 @@ export const potableWater: TestTemplateDef = {
     return {
       results: {
         parametersFailed: failed,
-        waterQualityIndex: round(100 - (ratioSum / LIMITS.filter((l) => l.max > 0).length) * 50, 1),
+        waterQualityIndex: round(100 - (ratioSum / Math.max(1, LIMITS.filter((l) => l.max > 0 && i[l.name] !== undefined).length)) * 50, 1),
         suitableForDrinking: failed === 0,
         suitableForConcrete: !(i.chlorideMgL > 500 || i.sulfateMgL > 400),
       },
