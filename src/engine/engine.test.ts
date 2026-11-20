@@ -69,3 +69,20 @@ test("H1: SASO 1494 potable water limits", () => {
   assert.equal(bad.overall, "fail");
   assert.ok(bad.warnings.some((w) => w.includes("Bacterial")));
 });
+
+test("A1: set average check uses all specimen loads", () => {
+  const base = { specimenId: "S1", castingDate: "2026-01-01", testDate: "2026-01-29", maxLoadKn: 900, designStrengthMpa: 35 };
+  const ok = evaluate("A1", { ...base, specimenLoadsKn: [900, 880, 910] });
+  assert.equal(ok.overall, "pass");
+  const lowAvg = evaluate("A1", { ...base, specimenLoadsKn: [900, 700, 700] });
+  assert.equal(lowAvg.checks.find((c) => c.id === "average")?.status, "fail");
+});
+
+test("H1: nitrite is optional", () => {
+  const r = evaluate("H1", {
+    samplingPoint: "t", ph: 7, turbidityNtu: 1, colorTcu: 1, tdsMgL: 100, chlorideMgL: 10, sulfateMgL: 10, nitrateMgL: 1,
+    fluorideMgL: 0.1, ironMgL: 0.01, manganeseMgL: 0.01, leadMgL: 0, arsenicMgL: 0, cadmiumMgL: 0,
+    residualChlorineMgL: 0.3, totalColiformMpn: 0, eColiMpn: 0,
+  });
+  assert.equal(r.results.suitableForDrinking, true);
+});
