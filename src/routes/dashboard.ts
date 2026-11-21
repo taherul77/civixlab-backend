@@ -85,7 +85,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
       const plan = await tx.tenant.findUnique({ where: { id: req.actor!.tenantId }, select: { maxTestsPerMonth: true } });
       const since = monthStartUtc();
       const usage = {
-        testsThisMonth: allTests.filter((t) => t.createdAt >= since).length,
+        // Same query as the enforcement in POST /v1/operations/tests, so the two numbers always agree.
+        testsThisMonth: await tx.test.count({ where: { createdAt: { gte: since } } }),
         maxTestsPerMonth: plan?.maxTestsPerMonth ?? null,
       };
 
