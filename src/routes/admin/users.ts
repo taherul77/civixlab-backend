@@ -87,7 +87,7 @@ export async function userRoutes(app: FastifyInstance) {
     const tenantRow = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { maxUsers: true } });
     const activeMembers = await prisma.userTenantMembership.count({ where: { tenantId, isActive: true } });
     if (tenantRow && activeMembers >= tenantRow.maxUsers) {
-      return reply.status(402).send({
+      return reply.status(403).send({
         error: { code: "PLAN_LIMIT", message: `User limit reached (${tenantRow.maxUsers}). Contact your platform administrator.` },
       });
     }

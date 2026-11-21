@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { monthStartUtc } from "@/lib/plan-limits";
 import { withTenant } from "@/db/prisma";
 
 // Categorisation matches frontend `data-store.ts` — `t.testType` carries
@@ -80,7 +81,17 @@ export async function dashboardRoutes(app: FastifyInstance) {
         fail: v.fail,
       }));
 
+      // Monthly allowance usage (informational; creation is enforced in POST /v1/operations/tests).
+      const plan = await tx.tenant.findUnique({ where: { id: req.actor!.tenantId }, select: { maxTestsPerMonth: true } });
+      const since = monthStartUtc();
+      const usage = {
+        // Same query as the enforcement in POST /v1/operations/tests, so the two numbers always agree.
+        testsThisMonth: await tx.test.count({ where: { createdAt: { gte: since } } }),
+        maxTestsPerMonth: plan?.maxTestsPerMonth ?? null,
+      };
+
       return {
+        usage,
         testsToday,
         pendingReview,
         approvedThisMonth,

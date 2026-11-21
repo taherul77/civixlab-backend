@@ -3,6 +3,7 @@ import { z } from "zod";
 import { withTenant } from "@/db/prisma";
 import { appendAudit } from "@/lib/audit";
 import { calibrationBlockReason } from "@/lib/calibration";
+import { monthlyTestAllowanceError } from "@/lib/plan-limits-db";
 import { ACTION_PERMISSION, COMMENT_PERMISSIONS, REASON_REQUIRED, TRANSITIONS, canMove, isEditable, type WorkflowAction } from "@/lib/test-workflow";
 import { userAgentOf, localPart } from "@/lib/req";
 
@@ -108,6 +109,10 @@ export async function testRoutes(app: FastifyInstance) {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
+      // Monthly allowance (tenants.max_tests_per_month): shared, fail-closed check.
+      const blocked = await monthlyTestAllowanceError(tx, tenantId);
+      if (blocked) return reply.status(403).send({ error: blocked });
+
       const sample = await tx.sample.findUnique({ where: { id: body.sampleId } });
       if (!sample) return reply.status(422).send({ error: { code: "VALIDATION", message: "Unknown sampleId" } });
       const project = await tx.project.findUnique({ where: { id: body.projectId } });
