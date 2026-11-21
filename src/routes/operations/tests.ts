@@ -3,6 +3,7 @@ import { z } from "zod";
 import { withTenant } from "@/db/prisma";
 import { appendAudit } from "@/lib/audit";
 import { calibrationBlockReason } from "@/lib/calibration";
+import { monthStartUtc, monthlyLimitMessage, monthlyLimitReached } from "@/lib/plan-limits";
 import { ACTION_PERMISSION, COMMENT_PERMISSIONS, REASON_REQUIRED, TRANSITIONS, canMove, isEditable, type WorkflowAction } from "@/lib/test-workflow";
 import { userAgentOf, localPart } from "@/lib/req";
 
@@ -108,6 +109,16 @@ export async function testRoutes(app: FastifyInstance) {
     const body = CreateBody.parse(req.body);
     const { tenantId, sub: userId, email, role } = req.actor!;
     return withTenant(tenantId, async (tx) => {
+      // Monthly allowance (tenants.max_tests_per_month). Serialised per tenant so concurrent creates cannot overshoot.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${tenantId}, 2))`;
+      const plan = await tx.tenant.findUnique({ where: { id: tenantId }, select: { maxTestsPerMonth: true } });
+      if (plan) {
+        const used = await tx.test.count({ where: { createdAt: { gte: monthStartUtc() } } });
+        if (monthlyLimitReached(used, plan.maxTestsPerMonth)) {
+          return reply.status(402).send({ error: { code: "PLAN_LIMIT", message: monthlyLimitMessage(plan.maxTestsPerMonth) } });
+        }
+      }
+
       const sample = await tx.sample.findUnique({ where: { id: body.sampleId } });
       if (!sample) return reply.status(422).send({ error: { code: "VALIDATION", message: "Unknown sampleId" } });
       const project = await tx.project.findUnique({ where: { id: body.projectId } });
