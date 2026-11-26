@@ -21,6 +21,9 @@ export const errorHandlerPlugin = fp(async function (app: FastifyInstance) {
     if (msg.startsWith("UNAUTHENTICATED")) {
       return reply.status(401).send({ error: { code: "UNAUTHENTICATED", message: msg } });
     }
+    if (msg.startsWith("BAD_REQUEST:")) {
+      return reply.status(400).send({ error: { code: "BAD_REQUEST", message: msg } });
+    }
     req.log.error({ err }, "unhandled error");
     return reply.status(err.statusCode ?? 500).send({
       error: { code: "INTERNAL", message: msg || "Internal server error" },

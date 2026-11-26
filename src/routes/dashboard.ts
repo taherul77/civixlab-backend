@@ -29,6 +29,9 @@ function monthBuckets(): { key: string; label: string }[] {
 
 export async function dashboardRoutes(app: FastifyInstance) {
   app.get("/v1/dashboard/stats", { onRequest: [app.requireAuth] }, async (req) => {
+    if (!req.actor!.tenantId) {
+      throw new Error("BAD_REQUEST: No company selected for this session");
+    }
     return withTenant(req.actor!.tenantId, async (tx) => {
       const [allTests, equipment, activeProjects, recentTests] = await Promise.all([
         tx.test.findMany({
